@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"os"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/intecs/iot-monitoring/backend/internal/api"
 	"github.com/intecs/iot-monitoring/backend/internal/database"
 	"github.com/intecs/iot-monitoring/backend/internal/device"
+	"github.com/intecs/iot-monitoring/backend/internal/websocket"
 	"github.com/joho/godotenv"
 )
 
@@ -35,6 +37,45 @@ func main() {
 	devMgr := device.NewManager(db)
 	alertMgr := alert.NewManager(db, highTempThreshold)
 
+	router, hub := api.NewRouter(db, devMgr, alertMgr)
+
+	onMessage := func(c mqtt.Client, msg mqtt.Message) {
+		devMgr.HandleTelemetry(msg)
+		alertMgr.CheckAlerts(msg)
+
+		payload := parsePayload(msg.Payload())
+		if payload == nil {
+			return
+		}
+
+		deviceID, _ := payload["device_id"].(string)
+		timestamp, _ := payload["timestamp"].(string)
+
+		hub.Broadcast(websocket.MessageTypeTelemetry, map[string]interface{}{
+			"device_id":         deviceID,
+			"timestamp":         timestamp,
+			"fuel_percent":      safeNum(payload["fuel_percentage"]),
+			"fuel_level":        safeNum(payload["fuel_level"]),
+			"temperature":       safeNum(payload["temperature"]),
+			"flow_rate":         safeNum(payload["flow_rate"]),
+			"equipment_status":  payload["equipment_status"],
+		})
+	}
+
+	onConnect := func(c mqtt.Client) {
+		log.Println("MQTT connected successfully")
+		sub := "intecs/site/+/device/+/telemetry"
+		token := c.Subscribe(sub, 1, onMessage)
+		token.Wait()
+		log.Printf("Subscribed to: %s", sub)
+		hub.SetMQTTStatus(true, "")
+	}
+
+	onDisconnect := func(c mqtt.Client, err error) {
+		log.Printf("MQTT connection lost: %v. Will reconnect...", err)
+		hub.SetMQTTStatus(false, "")
+	}
+
 	opts := mqtt.NewClientOptions().
 		AddBroker(mqttURL).
 		SetClientID("intecs-backend").
@@ -42,19 +83,8 @@ func main() {
 		SetPassword(mqttPass).
 		SetKeepAlive(30).
 		SetAutoReconnect(true).
-		SetOnConnectHandler(func(client mqtt.Client) {
-			log.Println("MQTT connected successfully")
-			sub := "intecs/site/+/device/+/telemetry"
-			token := client.Subscribe(sub, 1, func(c mqtt.Client, msg mqtt.Message) {
-				devMgr.HandleTelemetry(msg)
-				alertMgr.CheckAlerts(msg)
-			})
-			token.Wait()
-			log.Printf("Subscribed to: %s", sub)
-		}).
-		SetConnectionLostHandler(func(c mqtt.Client, err error) {
-			log.Printf("MQTT connection lost: %v. Will reconnect...", err)
-		})
+		SetOnConnectHandler(onConnect).
+		SetConnectionLostHandler(onDisconnect)
 
 	client := mqtt.NewClient(opts)
 	token := client.Connect()
@@ -63,9 +93,7 @@ func main() {
 		log.Printf("Warning: MQTT connection failed initially, will retry automatically: %v", token.Error)
 	}
 
-	router := api.NewRouter(db, devMgr, alertMgr)
-
-	log.Printf("REST API starting on :8080")
+	log.Printf("REST API starting on :8080 with WebSocket support")
 	if err := api.Start(router, ":8080"); err != nil {
 		log.Fatal(err)
 	}
@@ -77,4 +105,27 @@ func getEnvOrDefault(key, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+func parsePayload(payload []byte) map[string]interface{} {
+	var m map[string]interface{}
+	if err := json.Unmarshal(payload, &m); err != nil {
+		return nil
+	}
+	return m
+}
+
+func safeNum(v interface{}) float64 {
+	switch val := v.(type) {
+	case float64:
+		return val
+	case int:
+		return float64(val)
+	case int64:
+		return float64(val)
+	case nil:
+		return 0
+	default:
+		return 0
+	}
 }

@@ -525,3 +525,53 @@ main {
   outline: 2px solid var(--accent-blue);
   outline-offset: 2px;
 }
+
+/* MQTT Status Bar */
+.mqtt-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 1rem;
+  font-size: 0.75rem;
+  background-color: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-light);
+  color: var(--text-secondary);
+  transition: background-color 0.3s ease;
+}
+
+.mqtt-status-bar.disconnected {
+  background-color: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.mqtt-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--danger);
+  transition: background-color 0.3s ease;
+  flex-shrink: 0;
+}
+
+.mqtt-status-dot.online {
+  background-color: var(--success);
+  box-shadow: 0 0 4px rgba(16, 185, 129, 0.4);
+}
+
+.mqtt-status-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 768px) {
+  .mqtt-status-bar {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.7rem;
+  }
+  
+  .mqtt-status-text span:last-child {
+    display: none;
+  }
+}
+

@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/intecs/iot-monitoring/backend/internal/alert"
 	"github.com/intecs/iot-monitoring/backend/internal/device"
+	"github.com/intecs/iot-monitoring/backend/internal/websocket"
 )
 
 type Server struct {
@@ -19,17 +20,22 @@ type Server struct {
 	db       *sql.DB
 	devMgr   *device.Manager
 	alertMgr *alert.Manager
+	wsHub    *websocket.Hub
 }
 
-func NewRouter(db *sql.DB, devMgr *device.Manager, alertMgr *alert.Manager) http.Handler {
+func NewRouter(db *sql.DB, devMgr *device.Manager, alertMgr *alert.Manager) (http.Handler, *websocket.Hub) {
+	hub := websocket.NewHub()
+	go hub.Run()
+
 	s := &Server{
 		router:   mux.NewRouter(),
 		db:       db,
 		devMgr:   devMgr,
 		alertMgr: alertMgr,
+		wsHub:    hub,
 	}
 	s.routes()
-	return s.router
+	return s.router, hub
 }
 
 func (s *Server) routes() {
@@ -41,6 +47,8 @@ func (s *Server) routes() {
 	api.HandleFunc("/devices/{id}/telemetry", s.handleDeviceTelemetry).Methods("GET")
 	api.HandleFunc("/alerts", s.handleAlerts).Methods("GET")
 	api.HandleFunc("/alerts/{id}/acknowledge", s.handleAckAlert).Methods("POST")
+	api.HandleFunc("/ws", handleWebSocket(s.wsHub)).Methods("GET")
+	api.HandleFunc("/mqtt/status", handleMQTTStatus(s.wsHub)).Methods("GET")
 }
 
 func Start(handler http.Handler, addr string) error {
