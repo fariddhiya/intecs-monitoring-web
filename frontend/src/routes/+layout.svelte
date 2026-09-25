@@ -9,7 +9,26 @@
   let ws = null;
   let heartbeatTimer = null;
   let reconnectTimer = null;
-  
+  let darkMode = $state(false);
+
+  // Load theme preference
+  if (typeof window !== 'undefined') {
+    darkMode = localStorage.getItem('intecs-theme') === 'dark';
+    applyTheme();
+  }
+
+  function applyTheme() {
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+    }
+    localStorage.setItem('intecs-theme', darkMode ? 'dark' : 'light');
+  }
+
+  function toggleDarkMode() {
+    darkMode = !darkMode;
+    applyTheme();
+  }
+
   function connectWebSocket() {
     if (ws) return;
     
@@ -124,6 +143,13 @@
       <a href="/devices" class:active={$page.url.pathname.startsWith('/devices')} >Devices</a>
       <a href="/alerts" class:active={$page.url.pathname === '/alerts'}>Alerts</a>
     </div>
+    <button class="theme-toggle" on:click={toggleDarkMode} title="Toggle dark mode">
+      {#if darkMode}
+        &#9788;
+      {:else}
+        &#9790;
+      {/if}
+    </button>
   </div>
 </nav>
 
@@ -138,3 +164,28 @@
 <main>
   <slot />
 </main>
+
+<style>
+  .theme-toggle {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #94a3b8;
+    padding: 0.5rem;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 1.1rem;
+    line-height: 1;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+  }
+  
+  .theme-toggle:hover {
+    color: white;
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+</style>

@@ -94,6 +94,32 @@
     }
   }
 
+  function exportCSV(alertsToExport, filename) {
+    if (!alertsToExport.length) return;
+    
+    const headers = ['Type', 'Severity', 'Device ID', 'Message', 'Status', 'Created At', 'Resolved At'];
+    const rows = alertsToExport.map(a => [
+      a.type,
+      a.severity,
+      a.device_id,
+      a.message,
+      a.status,
+      a.created_at,
+      a.resolved_at || '',
+    ]);
+    
+    const csvContent = [headers.join(','), ...rows.map(r => r.map(v => `"${v}"`).join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${filename}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
   window.addEventListener('intecs:alert', (e) => {
     const alert = e.detail;
     if (!alert || !alert.severity) return;
@@ -119,7 +145,7 @@
 
 <div class="alerts-section">
   <div class="table-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
-    <div style="display: flex; gap: 0.5rem;">
+    <div style="display: flex; gap: 0.5rem; align-items: center;">
       <button 
         class="tab-btn {activeTab === 'active' ? 'active' : ''}" 
         on:click={() => activeTab = 'active'}>
@@ -131,7 +157,14 @@
         History ({historyAlerts.length})
       </button>
     </div>
-    <span class="alert-count">{visibleAlerts.length} alert{visibleAlerts.length !== 1 ? 's' : ''}</span>
+    <div style="display: flex; gap: 0.5rem; align-items: center;">
+      <button 
+        class="export-btn-small" 
+        on:click={() => exportCSV(visibleAlerts, activeTab === 'active' ? 'active_alerts' : 'alert_history')}>
+        &#128196; Export
+      </button>
+      <span class="alert-count">{visibleAlerts.length} alert{visibleAlerts.length !== 1 ? 's' : ''}</span>
+    </div>
   </div>
   
   {#if loading && visibleAlerts.length === 0}
@@ -205,6 +238,23 @@
   .tab-btn.active {
     background: var(--accent-blue);
     color: white;
+  }
+  
+  .export-btn-small {
+    background: transparent;
+    border: 1px solid var(--border-light);
+    color: var(--text-secondary);
+    padding: 0.35rem 0.6rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  
+  .export-btn-small:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--accent-blue);
   }
   
   .alert-count {
