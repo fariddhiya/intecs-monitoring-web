@@ -66,7 +66,7 @@ func main() {
 		log.Println("MQTT connected successfully")
 		sub := "intecs/site/+/device/+/telemetry"
 		token := c.Subscribe(sub, 1, onMessage)
-		token.Wait()
+		token.WaitTimeout(5 * time.Second)
 		log.Printf("Subscribed to: %s", sub)
 		hub.SetMQTTStatus(true, "")
 	}

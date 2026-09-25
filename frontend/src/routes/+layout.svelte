@@ -9,12 +9,19 @@
   let ws = null;
   let heartbeatTimer = null;
   let reconnectTimer = null;
-  let darkMode = $state(false);
+  let darkMode = false;
+  let themeChanged = 0;
 
   // Load theme preference
   if (typeof window !== 'undefined') {
     darkMode = localStorage.getItem('intecs-theme') === 'dark';
     applyTheme();
+  }
+
+  $: {
+    if (themeChanged) {
+      applyTheme();
+    }
   }
 
   function applyTheme() {
@@ -26,7 +33,7 @@
 
   function toggleDarkMode() {
     darkMode = !darkMode;
-    applyTheme();
+    themeChanged += 1;
   }
 
   function connectWebSocket() {
