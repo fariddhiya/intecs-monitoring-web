@@ -1,0 +1,26 @@
+# Environment files
+.env
+
+# Node modules
+node_modules/
+
+# Build outputs
+dist/
+build/
+*.exe
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Go
+vendor/
+
+# Database
+*.db
+*.sql
+
+# Docker compose env
+.env.*.local
