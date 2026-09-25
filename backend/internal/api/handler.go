@@ -75,6 +75,7 @@ type DashboardResponse struct {
 type DeviceView struct {
 	ID             string  `json:"id"`
 	DeviceID       string  `json:"device_id"`
+	Name           string  `json:"name"`
 	Site           string  `json:"site"`
 	FuelPercent    float64 `json:"fuel_percent"`
 	Temperature    float64 `json:"temperature"`
@@ -171,15 +172,78 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.db.Query(`
-		SELECT d.device_id, t.fuel_percentage, t.temperature, t.flow_rate, t.equipment_status, d.last_seen
+	query := `
+		SELECT d.device_id, t.fuel_percentage, t.temperature, t.flow_rate, 
+		       t.equipment_status, d.last_seen, d.name, s.name as site_name
 		FROM devices d
 		LEFT JOIN LATERAL (
 			SELECT fuel_percentage, temperature, flow_rate, equipment_status
 			FROM telemetry WHERE device_id = d.device_id ORDER BY timestamp DESC LIMIT 1
 		) t ON TRUE
-		ORDER BY d.device_id
-	`)
+	`
+	
+	args := []interface{}{}
+	argCount := 1
+	
+	var conditions []string
+	
+	// Search by device_id
+	search := r.URL.Query().Get("search")
+	if search != "" {
+		conditions = append(conditions, fmt.Sprintf("d.device_id ILIKE $%d", argCount))
+		args = append(args, "%"+search+"%")
+		argCount++
+	}
+	
+	// Filter by connection status
+	connStatus := r.URL.Query().Get("connection")
+	if connStatus != "" {
+		// We'll filter in-memory after fetching
+	}
+	
+	// Filter by equipment status
+	equipStatus := r.URL.Query().Get("equipment_status")
+	if equipStatus != "" {
+		conditions = append(conditions, fmt.Sprintf("t.equipment_status = $%d", argCount))
+		args = append(args, equipStatus)
+		argCount++
+	}
+	
+	// Add conditions to query
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	
+	// Sort
+	sortCol := r.URL.Query().Get("sort")
+	sortDir := r.URL.Query().Get("dir")
+	if sortCol == "" {
+		sortCol = "device_id"
+	}
+	sortDir = strings.ToUpper(sortDir)
+	if sortDir != "ASC" && sortDir != "DESC" {
+		sortDir = "ASC"
+	}
+	
+	// Map sort columns
+	sortMap := map[string]string{
+		"device_id":     "d.device_id",
+		"site":          "s.name",
+		"fuel_percent":  "t.fuel_percentage",
+		"temperature":   "t.temperature",
+		"flow_rate":     "t.flow_rate",
+		"connection":    "d.last_seen",
+		"last_seen":     "d.last_seen",
+		"equipment":     "t.equipment_status",
+	}
+	sortedCol := sortMap[sortCol]
+	if sortedCol == "" {
+		sortedCol = "d.device_id"
+	}
+	
+	query += fmt.Sprintf(" ORDER BY %s %s", sortedCol, sortDir)
+	
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -191,9 +255,10 @@ func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
 		var d DeviceView
 		var lastSeen time.Time
 		var fuelPct, temp, flow sql.NullFloat64
-		var equipStatus string
+		var equipStatus, deviceName string
+		var siteName sql.NullString
 
-		err := rows.Scan(&d.DeviceID, &fuelPct, &temp, &flow, &equipStatus, &lastSeen)
+		err := rows.Scan(&d.DeviceID, &fuelPct, &temp, &flow, &equipStatus, &lastSeen, &deviceName, &siteName)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -206,7 +271,17 @@ func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
 		d.Connection = computeConnection(lastSeen)
 		d.LastSeen = lastSeen.Format(time.RFC3339)
 		d.ID = d.DeviceID
-		d.Site = "Sangatta"
+		d.Name = deviceName
+		if siteName.Valid {
+			d.Site = siteName.String
+		} else {
+			d.Site = "Unknown"
+		}
+		
+		// Apply connection filter if requested
+		if connStatus != "" && d.Connection != connStatus {
+			continue
+		}
 
 		devices = append(devices, d)
 	}
