@@ -1,6 +1,9 @@
 <script>
   import { page } from '$app/stores';
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
+  import { Chart, registerables } from 'chart.js';
+  
+  Chart.register(...registerables);
 
   $: deviceId = $page.params.id;
   
@@ -8,6 +11,20 @@
   let telemetry = [];
   let loading = true;
   let error = null;
+  let timeRange = '24h';
+  let fuelChart = null;
+  let tempChart = null;
+  let fuelCanvas = null;
+  let tempCanvas = null;
+  let chartLoaded = false;
+  let wsTelemetryHandler = null;
+
+  const rangeOptions = [
+    { label: '1 Jam', value: '1h' },
+    { label: '6 Jam', value: '6h' },
+    { label: '24 Jam', value: '24h' },
+    { label: '7 Hari', value: '7d' },
+  ];
 
   async function refreshDevice() {
     try {
@@ -29,39 +46,55 @@
     }
   }
 
-  async function refreshTelemetry() {
+  async function loadTelemetry() {
     try {
-      const res = await fetch(`/api/devices/${deviceId}/telemetry?limit=30`);
+      const res = await fetch(`/api/devices/${deviceId}/telemetry?range=${timeRange}&limit=500`);
       if (res.ok) {
         telemetry = await res.json();
       }
     } catch (e) {
-      console.error(e);
+      console.error('Error loading telemetry:', e);
     }
   }
 
-  onMount(() => {
-    refreshDevice();
-    refreshTelemetry();
-    setInterval(refreshDevice, 5000);
-    setInterval(refreshTelemetry, 10000);
-  });
-
-  $: fuelColor = device ? getFuelColor(device.fuel_percent) : '#94a3b8';
-  $: tempWarning = device && device.temperature > 85;
-  $: connClass = device ? getConnClass(device.connection) : '';
-  $: equipStatus = device?.equipment_status || '-';
-  
-  $: fuelHistory = telemetry.slice(-20);
-  $: tempHistory = telemetry.slice(-20);
-  $: maxTemp = tempHistory.length > 0 ? Math.max(...tempHistory.map(t => t.temperature), 100) : 100;
-
-  function getConnClass(c) {
-    switch(c) {
-      case 'ONLINE': return 'conn-online';
-      case 'STALE': return 'conn-stale';
-      default: return 'conn-offline';
+  function handleWsTelemetry(event) {
+    if (event.detail && event.detail.device_id === deviceId) {
+      const ts = new Date(event.detail.timestamp).getTime();
+      telemetry = telemetry.filter(t => new Date(t.timestamp).getTime() < ts);
+      
+      const newPoint = {
+        timestamp: event.detail.timestamp,
+        fuel_percent: event.detail.fuel_percent || 0,
+        fuel_level: event.detail.fuel_level || 0,
+        temperature: event.detail.temperature || 0,
+        flow_rate: event.detail.flow_rate || 0,
+      };
+      
+      telemetry.push(newPoint);
+      updateCharts();
     }
+  }
+
+  function updateTimeRange(newRange) {
+    timeRange = newRange;
+    chartLoaded = false;
+    loadTelemetry();
+  }
+
+  function formatTime(ts) {
+    return ts ? new Date(ts).toLocaleString([], {
+      month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    }) : '-';
+  }
+
+  function getTimeLabel(ts) {
+    const d = new Date(ts);
+    const now = new Date();
+    const diffSec = Math.floor((now - d) / 1000);
+    if (diffSec < 60) return `${diffSec}s ago`;
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
   function getFuelColor(p) {
@@ -71,18 +104,12 @@
     return '#10b981';
   }
 
-  function formatTime(ts) {
-    return ts ? new Date(ts).toLocaleString([], {
-      year: 'numeric', month: 'short', day: 'numeric',
-      hour: '2-digit', minute: '2-digit'
-    }) : '-';
-  }
-
-  function getTimeLabel(ts) {
-    const d = new Date(ts);
-    const now = new Date();
-    const diffSec = Math.floor((now - d) / 1000);
-    return diffSec < 60 ? `${diffSec}s ago` : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  function getConnClass(c) {
+    switch(c) {
+      case 'ONLINE': return 'conn-online';
+      case 'STALE': return 'conn-stale';
+      default: return 'conn-offline';
+    }
   }
 
   function getEquipClass(status) {
@@ -93,6 +120,159 @@
       default: return '';
     }
   }
+
+  $: fuelColor = device ? getFuelColor(device.fuel_percent) : '#94a3b8';
+  $: tempWarning = device && device.temperature > 85;
+  $: connClass = device ? getConnClass(device.connection) : '';
+  $: equipStatus = device?.equipment_status || '-';
+
+  function destroyCharts() {
+    if (fuelChart) {
+      fuelChart.destroy();
+      fuelChart = null;
+    }
+    if (tempChart) {
+      tempChart.destroy();
+      tempChart = null;
+    }
+  }
+
+  function updateCharts() {
+    if (!chartLoaded || !telemetry.length) return;
+    
+    const labels = telemetry.map(t => getTimeLabel(t.timestamp));
+    const fuelData = telemetry.map(t => t.fuel_percent);
+    const tempData = telemetry.map(t => t.temperature);
+    const flowData = telemetry.map(t => t.flow_rate);
+
+    if (fuelChart) {
+      fuelChart.data.labels = labels;
+      fuelChart.data.datasets[0].data = fuelData;
+      fuelChart.update('none');
+    }
+
+    if (tempChart) {
+      tempChart.data.labels = labels;
+      tempChart.data.datasets[0].data = tempData;
+      tempChart.update('none');
+    }
+  }
+
+  function initCharts() {
+    if (!chartLoaded) {
+      chartLoaded = true;
+    }
+
+    destroyCharts();
+    if (!fuelCanvas || !tempCanvas || !telemetry.length) return;
+
+    const ctx1 = fuelCanvas.getContext('2d');
+    const ctx2 = tempCanvas.getContext('2d');
+
+    const labels = telemetry.map(t => getTimeLabel(t.timestamp));
+    const fuelData = telemetry.map(t => t.fuel_percent);
+    const tempData = telemetry.map(t => t.temperature);
+    const flowData = telemetry.map(t => t.flow_rate);
+
+    const commonOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1e293b',
+          titleColor: '#fff',
+          bodyColor: '#cbd5e1',
+          padding: 10,
+          cornerRadius: 8,
+          displayColors: true,
+        },
+      },
+      scales: {
+        x: {
+          grid: { color: '#e2e8f0', drawBorder: false },
+          ticks: { color: '#64748b', maxTicksLimit: 10, font: { size: 11 } },
+        },
+        y: {
+          grid: { color: '#e2e8f0', drawBorder: false },
+          ticks: { color: '#64748b', font: { size: 11 } },
+        },
+      },
+      elements: {
+        point: { radius: 2, hoverRadius: 5, hitRadius: 5 },
+        line: { tension: 0.3, borderWidth: 2 },
+      },
+    };
+
+    fuelChart = new Chart(ctx1, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: fuelData,
+          borderColor: '#10b981',
+          backgroundColor: 'rgba(16, 185, 129, 0.1)',
+          fill: true,
+          yAxisID: 'y',
+        }],
+      },
+      options: {
+        ...commonOptions,
+        scales: {
+          ...commonOptions.scales,
+          y: {
+            ...commonOptions.scales.y,
+            min: 0,
+            max: 100,
+            ticks: {
+              ...commonOptions.scales.y.ticks,
+              callback: v => v + '%',
+            },
+          },
+        },
+      },
+    });
+
+    tempChart = new Chart(ctx2, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: tempData,
+          borderColor: '#3b82f6',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          fill: true,
+        }],
+      },
+      options: commonOptions,
+    });
+  }
+
+  $: if (telemetry.length && chartLoaded) {
+    updateCharts();
+  }
+
+  $: if (telemetry.length > 0) {
+    initCharts();
+  }
+
+  onMount(() => {
+    refreshDevice();
+    loadTelemetry();
+    setInterval(refreshDevice, 5000);
+    setInterval(loadTelemetry, 15000);
+
+    wsTelemetryHandler = (e) => handleWsTelemetry(e);
+    window.addEventListener('intecs:telemetry', wsTelemetryHandler);
+  });
+
+  onDestroy(() => {
+    destroyCharts();
+    if (wsTelemetryHandler) {
+      window.removeEventListener('intecs:telemetry', wsTelemetryHandler);
+    }
+  });
 </script>
 
 <div class="detail-page">
@@ -168,49 +348,41 @@
       </div>
     </div>
 
-    {#if fuelHistory.length > 0}
-      <div class="chart-card">
-        <div class="chart-header">
-          <h2>Fuel Percentage History</h2>
-          <span class="chart-legend">20 data points</span>
-        </div>
-        <div class="bars-container">
-          {#each fuelHistory as point}
-            <div class="bar-wrapper">
-              <div class="bar" 
-                   style="height: {point.fuel_percentage}%; background: {getFuelColor(point.fuel_percentage)}" 
-                   title="{point.fuel_percentage.toFixed(1)}%">
-              </div>
-              {#if fuelHistory.indexOf(point) % Math.ceil(fuelHistory.length / 5) === 0}
-                <span class="bar-time">{getTimeLabel(point.timestamp)}</span>
-              {/if}
-            </div>
+    <div class="chart-card">
+      <div class="chart-header">
+        <h2>Fuel Percentage History</h2>
+        <div class="range-selector">
+          {#each rangeOptions as opt}
+            <button 
+              class="range-btn {timeRange === opt.value ? 'active' : ''}" 
+              on:click={() => updateTimeRange(opt.value)}>
+              {opt.label}
+            </button>
           {/each}
         </div>
       </div>
-    {/if}
+      <div class="chart-container">
+        <canvas bind:this={fuelCanvas}></canvas>
+      </div>
+    </div>
 
-    {#if tempHistory.length > 0}
-      <div class="chart-card">
-        <div class="chart-header">
-          <h2>Temperature History</h2>
-          <span class="chart-legend">20 data points</span>
-        </div>
-        <div class="bars-container">
-          {#each tempHistory as point}
-            <div class="bar-wrapper">
-              <div class="bar temp-bar" 
-                   style="height: {(point.temperature / maxTemp) * 100}%; background: {point.temperature > 85 ? '#ef4444' : '#3b82f6'}" 
-                   title="{point.temperature.toFixed(1)}&deg;C">
-              </div>
-              {#if tempHistory.indexOf(point) % Math.ceil(tempHistory.length / 5) === 0}
-                <span class="bar-time">{getTimeLabel(point.timestamp)}</span>
-              {/if}
-            </div>
+    <div class="chart-card">
+      <div class="chart-header">
+        <h2>Temperature History</h2>
+        <div class="range-selector">
+          {#each rangeOptions as opt}
+            <button 
+              class="range-btn {timeRange === opt.value ? 'active' : ''}" 
+              on:click={() => updateTimeRange(opt.value)}>
+              {opt.label}
+            </button>
           {/each}
         </div>
       </div>
-    {/if}
+      <div class="chart-container">
+        <canvas bind:this={tempCanvas}></canvas>
+      </div>
+    </div>
   {/if}
 </div>
 
@@ -354,6 +526,8 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 1.25rem;
+    flex-wrap: wrap;
+    gap: 1rem;
   }
   
   .chart-header h2 {
@@ -362,48 +536,41 @@
     font-weight: 600;
   }
   
-  .chart-legend {
-    font-size: 0.8rem;
-    color: var(--text-muted);
+  .range-selector {
+    display: flex;
+    gap: 0.25rem;
     background: var(--bg-tertiary);
-    padding: 0.25rem 0.75rem;
-    border-radius: 100px;
+    padding: 3px;
+    border-radius: var(--radius-md);
   }
   
-  .bars-container {
-    display: flex;
-    align-items: flex-end;
-    gap: 4px;
-    height: 180px;
-    overflow-x: auto;
-    padding-top: 0.5rem;
-    scrollbar-width: thin;
+  .range-btn {
+    background: transparent;
+    border: none;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: calc(var(--radius-md) - 2px);
+    transition: all 0.2s ease;
+    font-weight: 500;
   }
   
-  .bar-wrapper {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.5rem;
-    flex-shrink: 0;
+  .range-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.5);
   }
   
-  .bar {
-    width: 18px;
-    border-radius: 4px 4px 0 0;
-    transition: height 0.5s ease;
-    min-height: 2px;
-    cursor: default;
+  .range-btn.active {
+    background: var(--bg-secondary);
+    color: var(--accent-blue);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   }
   
-  .temp-bar {
-    width: 14px;
-  }
-  
-  .bar-time {
-    font-size: 0.65rem;
-    color: var(--text-muted);
-    white-space: nowrap;
+  .chart-container {
+    position: relative;
+    height: 250px;
+    width: 100%;
   }
   
   @keyframes spin {
@@ -485,6 +652,15 @@
     
     .detail-header {
       flex-direction: column;
+    }
+    
+    .chart-header {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    
+    .chart-container {
+      height: 200px;
     }
   }
 </style>

@@ -253,17 +253,24 @@ func (s *Server) handleDeviceTelemetry(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	deviceID := vars["id"]
 
+	rangeStr := r.URL.Query().Get("range")
 	limitStr := r.URL.Query().Get("limit")
-	limit := 50
+
+	timeRange, pointsPerRange := parseTimeRange(rangeStr)
+
+	limit := pointsPerRange
 	if limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 500 {
 			limit = l
 		}
 	}
 
+	now := time.Now()
+	startTime := now.Add(-timeRange)
+
 	rows, err := s.db.Query(
-		"SELECT timestamp, fuel_percentage, temperature, flow_rate FROM telemetry WHERE device_id = $1 ORDER BY timestamp DESC LIMIT $2",
-		deviceID, limit,
+		"SELECT timestamp, fuel_percentage, fuel_level, temperature, flow_rate FROM telemetry WHERE device_id = $1 AND timestamp >= $2 ORDER BY timestamp ASC LIMIT $3",
+		deviceID, startTime, limit,
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -274,6 +281,7 @@ func (s *Server) handleDeviceTelemetry(w http.ResponseWriter, r *http.Request) {
 	type TelPoint struct {
 		Timestamp   string  `json:"timestamp"`
 		FuelPercent float64 `json:"fuel_percent"`
+		FuelLevel   float64 `json:"fuel_level"`
 		Temperature float64 `json:"temperature"`
 		FlowRate    float64 `json:"flow_rate"`
 	}
@@ -282,24 +290,35 @@ func (s *Server) handleDeviceTelemetry(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var tp TelPoint
 		var ts time.Time
-		var fuelPct, temp, flow sql.NullFloat64
-		if err := rows.Scan(&ts, &fuelPct, &temp, &flow); err != nil {
+		var fuelPct, fuelLvl, temp, flow sql.NullFloat64
+		if err := rows.Scan(&ts, &fuelPct, &fuelLvl, &temp, &flow); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		tp.Timestamp = ts.Format(time.RFC3339)
 		tp.FuelPercent = safeFloat64(fuelPct.Float64)
+		tp.FuelLevel = safeFloat64(fuelLvl.Float64)
 		tp.Temperature = safeFloat64(temp.Float64)
 		tp.FlowRate = safeFloat64(flow.Float64)
 		telements = append(telements, tp)
 	}
 
-	// Reverse to chronological order
-	for i, j := 0, len(telements)-1; i < j; i, j = i+1, j-1 {
-		telements[i], telements[j] = telements[j], telements[i]
-	}
-
 	writeJSON(w, telements)
+}
+
+func parseTimeRange(rangeStr string) (time.Duration, int) {
+	switch rangeStr {
+	case "1h":
+		return time.Hour, 60
+	case "6h":
+		return 6 * time.Hour, 72
+	case "24h":
+		return 24 * time.Hour, 288
+	case "7d":
+		return 7 * 24 * time.Hour, 1008
+	default:
+		return 24 * time.Hour, 288
+	}
 }
 
 func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
