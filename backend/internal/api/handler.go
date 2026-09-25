@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -23,7 +24,7 @@ type Server struct {
 	wsHub    *websocket.Hub
 }
 
-func NewRouter(db *sql.DB, devMgr *device.Manager, alertMgr *alert.Manager) (http.Handler, *websocket.Hub) {
+func NewRouter(db *sql.DB, devMgr *device.Manager) (http.Handler, *websocket.Hub) {
 	hub := websocket.NewHub()
 	go hub.Run()
 
@@ -31,11 +32,14 @@ func NewRouter(db *sql.DB, devMgr *device.Manager, alertMgr *alert.Manager) (htt
 		router:   mux.NewRouter(),
 		db:       db,
 		devMgr:   devMgr,
-		alertMgr: alertMgr,
 		wsHub:    hub,
 	}
 	s.routes()
 	return s.router, hub
+}
+
+func (s *Server) SetAlertManager(alertMgr *alert.Manager) {
+	s.alertMgr = alertMgr
 }
 
 func (s *Server) routes() {
@@ -46,7 +50,10 @@ func (s *Server) routes() {
 	api.HandleFunc("/devices/{id}", s.handleDeviceByID).Methods("GET")
 	api.HandleFunc("/devices/{id}/telemetry", s.handleDeviceTelemetry).Methods("GET")
 	api.HandleFunc("/alerts", s.handleAlerts).Methods("GET")
+	api.HandleFunc("/alerts/history", s.handleAlertHistory).Methods("GET")
 	api.HandleFunc("/alerts/{id}/acknowledge", s.handleAckAlert).Methods("POST")
+	api.HandleFunc("/thresholds", s.handleListThresholds).Methods("GET")
+	api.HandleFunc("/thresholds", s.handleUpdateThresholds).Methods("POST")
 	api.HandleFunc("/ws", handleWebSocket(s.wsHub)).Methods("GET")
 	api.HandleFunc("/mqtt/status", handleMQTTStatus(s.wsHub)).Methods("GET")
 }
@@ -368,6 +375,179 @@ func (s *Server) handleAckAlert(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleAlertHistory(w http.ResponseWriter, r *http.Request) {
+	deviceID := r.URL.Query().Get("device_id")
+	status := r.URL.Query().Get("status")
+	limitStr := r.URL.Query().Get("limit")
+	limit := 100
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 500 {
+			limit = l
+		}
+	}
+
+	query := `SELECT id, device_id, type, severity, message, status, created_at, resolved_at FROM alerts`
+	args := []interface{}{}
+	argCount := 1
+
+	var conditions []string
+	if deviceID != "" {
+		conditions = append(conditions, fmt.Sprintf("device_id = $%d", argCount))
+		args = append(args, deviceID)
+		argCount++
+	}
+	if status != "" {
+		conditions = append(conditions, fmt.Sprintf("status = $%d", argCount))
+		args = append(args, status)
+		argCount++
+	}
+
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT %d", limit)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type AlertHistoryView struct {
+		ID        string     `json:"id"`
+		DeviceID  string     `json:"device_id"`
+		Type      string     `json:"type"`
+		Severity  string     `json:"severity"`
+		Message   string     `json:"message"`
+		Status    string     `json:"status"`
+		CreatedAt string     `json:"created_at"`
+		ResolvedAt *string   `json:"resolved_at,omitempty"`
+	}
+
+	var alerts []AlertHistoryView
+	for rows.Next() {
+		var a AlertHistoryView
+		var createdAt time.Time
+		var resolvedAt sql.NullTime
+		if err := rows.Scan(&a.ID, &a.DeviceID, &a.Type, &a.Severity, &a.Message, &a.Status, &createdAt, &resolvedAt); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		a.CreatedAt = createdAt.Format(time.RFC3339)
+		if resolvedAt.Valid {
+			r := resolvedAt.Time.Format(time.RFC3339)
+			a.ResolvedAt = &r
+		}
+		alerts = append(alerts, a)
+	}
+
+	writeJSON(w, alerts)
+}
+
+func (s *Server) handleListThresholds(w http.ResponseWriter, r *http.Request) {
+	deviceID := r.URL.Query().Get("device_id")
+
+	if deviceID == "" {
+		rows, err := s.db.Query(`
+			SELECT device_id, warn_temp_threshold, crit_temp_threshold, 
+			       warn_fuel_threshold, crit_fuel_threshold, cooldown_seconds
+			FROM device_thresholds ORDER BY device_id
+		`)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		type ThresholdListEntry struct {
+			DeviceID        string  `json:"device_id"`
+			WarnTemp        float64 `json:"warn_temp_threshold"`
+			CritTemp        float64 `json:"crit_temp_threshold"`
+			WarnFuel        float64 `json:"warn_fuel_threshold"`
+			CritFuel        float64 `json:"crit_fuel_threshold"`
+			CooldownSeconds int     `json:"cooldown_seconds"`
+		}
+
+		var entries []ThresholdListEntry
+		for rows.Next() {
+			var e ThresholdListEntry
+			if err := rows.Scan(&e.DeviceID, &e.WarnTemp, &e.CritTemp, &e.WarnFuel, &e.CritFuel, &e.CooldownSeconds); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			entries = append(entries, e)
+		}
+		writeJSON(w, entries)
+		return
+	}
+
+	t, err := s.alertMgr.GetThresholds(deviceID)
+	if err != nil {
+		writeJSON(w, map[string]interface{}{
+			"warn_temp_threshold": 85,
+			"crit_temp_threshold": 90,
+			"warn_fuel_threshold": 20,
+			"crit_fuel_threshold": 10,
+			"cooldown_seconds": 30,
+		})
+		return
+	}
+	writeJSON(w, t)
+}
+
+func (s *Server) handleUpdateThresholds(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		DeviceID        string  `json:"device_id"`
+		WarnTempThreshold float64 `json:"warn_temp_threshold"`
+		CritTempThreshold float64 `json:"crit_temp_threshold"`
+		WarnFuelThreshold float64 `json:"warn_fuel_threshold"`
+		CritFuelThreshold float64 `json:"crit_fuel_threshold"`
+		CooldownSeconds   int     `json:"cooldown_seconds"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if input.DeviceID == "" {
+		http.Error(w, "device_id required", http.StatusBadRequest)
+		return
+	}
+
+	thresholds := &alert.DeviceThresholds{
+		WarnTempThreshold: input.WarnTempThreshold,
+		CritTempThreshold: input.CritTempThreshold,
+		WarnFuelThreshold: input.WarnFuelThreshold,
+		CritFuelThreshold: input.CritFuelThreshold,
+		CooldownSeconds:   input.CooldownSeconds,
+	}
+
+	if thresholds.WarnTempThreshold == 0 {
+		thresholds.WarnTempThreshold = 85
+	}
+	if thresholds.CritTempThreshold == 0 {
+		thresholds.CritTempThreshold = 90
+	}
+	if thresholds.WarnFuelThreshold == 0 {
+		thresholds.WarnFuelThreshold = 20
+	}
+	if thresholds.CritFuelThreshold == 0 {
+		thresholds.CritFuelThreshold = 10
+	}
+	if thresholds.CooldownSeconds == 0 {
+		thresholds.CooldownSeconds = 30
+	}
+
+	if err := s.alertMgr.UpsertThresholds(input.DeviceID, thresholds); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]string{"status": "ok", "device_id": input.DeviceID})
 }
 
 func writeJSON(w http.ResponseWriter, data interface{}) {

@@ -60,6 +60,17 @@ func Migrate(db *sql.DB) error {
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 			resolved_at TIMESTAMP WITH TIME ZONE
 		)`,
+		`CREATE TABLE IF NOT EXISTS device_thresholds (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			device_id TEXT UNIQUE NOT NULL,
+			warn_temp_threshold NUMERIC(5,2) DEFAULT 85,
+			crit_temp_threshold NUMERIC(5,2) DEFAULT 90,
+			warn_fuel_threshold NUMERIC(5,2) DEFAULT 20,
+			crit_fuel_threshold NUMERIC(5,2) DEFAULT 10,
+			cooldown_seconds INT DEFAULT 30,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_telemetry_device_timestamp ON telemetry(device_id, timestamp)`,
 		`CREATE INDEX IF NOT EXISTS idx_alerts_device ON alerts(device_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status)`,

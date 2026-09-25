@@ -5,7 +5,6 @@
   import AlertList from '$lib/components/AlertList.svelte';
 
   let stats = { total_devices: 0, online_devices: 0, offline_devices: 0, active_alerts: 0 };
-  let alerts = [];
   let loading = true;
   let error = null;
 
@@ -31,32 +30,9 @@
     }
   }
 
-  async function loadAlerts() {
-    try {
-      const res = await fetch('/api/alerts?status=active');
-      if (res.ok) {
-        alerts = await res.json();
-      }
-    } catch (e) {
-      console.error('Failed to load alerts:', e);
-    }
-  }
-
-  async function acknowledge(id) {
-    try {
-      await fetch(`/api/alerts/${id}/acknowledge`, { method: 'POST' });
-      await loadAlerts();
-      await loadDashboard();
-    } catch (e) {
-      console.error('Failed:', e);
-    }
-  }
-
   onMount(() => {
     loadDashboard();
-    loadAlerts();
     setInterval(loadDashboard, 5000);
-    setInterval(loadAlerts, 10000);
   });
 </script>
 
@@ -79,9 +55,7 @@
 
 <DeviceTable />
 
-{#if alerts.length > 0}
-  <AlertList {alerts} on:acknowledge={acknowledge} />
-{/if}
+<AlertList />
 
 <style>
   .stats-grid {

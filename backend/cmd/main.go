@@ -11,7 +11,7 @@ import (
 	"github.com/intecs/iot-monitoring/backend/internal/api"
 	"github.com/intecs/iot-monitoring/backend/internal/database"
 	"github.com/intecs/iot-monitoring/backend/internal/device"
-	"github.com/intecs/iot-monitoring/backend/internal/websocket"
+	ws "github.com/intecs/iot-monitoring/backend/internal/websocket"
 	"github.com/joho/godotenv"
 )
 
@@ -35,9 +35,9 @@ func main() {
 	}
 
 	devMgr := device.NewManager(db)
-	alertMgr := alert.NewManager(db, highTempThreshold)
 
-	router, hub := api.NewRouter(db, devMgr, alertMgr)
+	router, hub := api.NewRouter(db, devMgr)
+	alertMgr := alert.NewManager(db, hub, highTempThreshold)
 
 	onMessage := func(c mqtt.Client, msg mqtt.Message) {
 		devMgr.HandleTelemetry(msg)
@@ -51,7 +51,7 @@ func main() {
 		deviceID, _ := payload["device_id"].(string)
 		timestamp, _ := payload["timestamp"].(string)
 
-		hub.Broadcast(websocket.MessageTypeTelemetry, map[string]interface{}{
+		hub.Broadcast(ws.MessageTypeTelemetry, map[string]interface{}{
 			"device_id":         deviceID,
 			"timestamp":         timestamp,
 			"fuel_percent":      safeNum(payload["fuel_percentage"]),
