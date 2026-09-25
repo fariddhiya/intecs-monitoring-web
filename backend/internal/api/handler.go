@@ -212,7 +212,7 @@ func (s *Server) handleDeviceByID(w http.ResponseWriter, r *http.Request) {
 	deviceID := vars["id"]
 
 	row := s.db.QueryRow(`
-		SELECT d.device_id, s.name, d.status, COALESCE(t.fuel_percentage, 0), COALESCE(t.temperature, 0), 
+		SELECT d.device_id, s.name, d.status, COALESCE(t.fuel_percentage, 0), COALESCE(t.fuel_level, 0), COALESCE(t.temperature, 0), 
 			   COALESCE(t.flow_rate, 0), t.equipment_status, t.timestamp, d.last_seen
 		FROM devices d
 		LEFT JOIN sites s ON d.site_id = s.id
@@ -224,6 +224,7 @@ func (s *Server) handleDeviceByID(w http.ResponseWriter, r *http.Request) {
 		Site        string  `json:"site"`
 		Status      string  `json:"status"`
 		FuelPercent float64 `json:"fuel_percent"`
+		FuelLevel   float64 `json:"fuel_level"`
 		Temperature float64 `json:"temperature"`
 		FlowRate    float64 `json:"flow_rate"`
 		EquipStatus string  `json:"equipment_status"`
@@ -233,7 +234,7 @@ func (s *Server) handleDeviceByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var lastSeenTime time.Time
-	err := row.Scan(&resp.DeviceID, &resp.Site, &resp.Status, &resp.FuelPercent, &resp.Temperature, &resp.FlowRate, &resp.EquipStatus, &resp.LastTelTime, &lastSeenTime)
+	err := row.Scan(&resp.DeviceID, &resp.Site, &resp.Status, &resp.FuelPercent, &resp.FuelLevel, &resp.Temperature, &resp.FlowRate, &resp.EquipStatus, &resp.LastTelTime, &lastSeenTime)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			http.Error(w, fmt.Sprintf("Device %s not found", deviceID), http.StatusNotFound)

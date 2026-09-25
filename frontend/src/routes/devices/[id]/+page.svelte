@@ -146,7 +146,7 @@
         <div class="fuel-track">
           <div class="fuel-fill" style="width: {device.fuel_percent}%; background: {fuelColor}"></div>
         </div>
-        <span class="metric-sub">{Math.round(device.fuel_level)} Liters</span>
+        <span class="metric-sub">{device.fuel_level ? Math.round(device.fuel_level) : 0} Liters</span>
       </div>
 
       <div class="metric-card">
