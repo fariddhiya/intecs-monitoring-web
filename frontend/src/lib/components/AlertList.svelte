@@ -1,5 +1,9 @@
 <script>
-  let alerts = [];
+  import { createEventDispatcher } from 'svelte';
+  
+  export let alerts = [];
+  
+  const dispatch = createEventDispatcher();
   let loading = true;
   let error = null;
 
@@ -18,9 +22,10 @@
     }
   }
 
-  async function acknowledge(id) {
+  async function handleAcknowledge(id) {
     try {
       await fetch(`/api/alerts/${id}/acknowledge`, { method: 'POST' });
+      dispatch('acknowledge', id);
       await loadAlerts();
     } catch (e) {
       console.error('Failed to acknowledge alert:', e);
@@ -39,122 +44,135 @@
       default: return '';
     }
   }
+
+  function getSeverityIcon(severity) {
+    switch(severity) {
+      case 'critical': return '&#9888;&#65039;';
+      case 'high': return '&#9888;';
+      case 'medium': return '&#9432;';
+      case 'warning': return '&#9898;';
+      default: return '&#8505;';
+    }
+  }
 </script>
 
-{#if alerts.length > 0}
-  <div class="alerts-section">
-    <h2 style="margin-bottom: 1rem;">Active Alerts</h2>
+<div class="alerts-section">
+  <div class="table-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h2>Active Alerts</h2>
+    <span class="alert-count">{alerts.length} alert{alerts.length !== 1 ? 's' : ''}</span>
+  </div>
+  
+  {#if loading && alerts.length === 0}
+    <div class="loading-state">
+      <span class="loading-spinner"></span>
+      <span>Loading alerts...</span>
+    </div>
+  {:else if alerts.length === 0}
+    <div class="no-data">No active alerts</div>
+  {:else}
     <div class="alerts-list">
-      {#each alerts.slice(0, 5) as alert}
+      {#each alerts.slice(0, 10) as alert}
         <div class="alert-item {getSeverityClass(alert.severity)}">
           <div class="alert-content">
-            <span class="alert-type">{alert.type}</span>
-            <span class="alert-device">{alert.device_id}</span>
-            <p>{alert.message}</p>
+            <div class="alert-top">
+              <span class="alert-type">{alert.type}</span>
+              <span class="alert-device">{alert.device_id}</span>
+            </div>
+            <p class="alert-message">{alert.message}</p>
             <span class="alert-time">{new Date(alert.created_at).toLocaleString()}</span>
           </div>
-          <button class="ack-btn" on:click={() => acknowledge(alert.id)}>Acknowledge</button>
+          <button class="ack-btn" on:click={() => handleAcknowledge(alert.id)}>Acknowledge</button>
         </div>
       {/each}
     </div>
-  </div>
-{/if}
-
-{#if loading && alerts.length === 0}
-  <p>Loading alerts...</p>
-{/if}
-
-{#if error}
-  <div class="error-message">{error}</div>
-{/if}
+  {/if}
+  
+  {#if error}
+    <div class="error-message" style="margin-top: 1rem;">&#9888; {error}</div>
+  {/if}
+</div>
 
 <style>
   .alerts-section {
-    background: white;
-    border-radius: 8px;
-    padding: 1.5rem;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    margin-top: 2rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-light);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+  
+  .alert-count {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    background: var(--bg-tertiary);
+    padding: 0.25rem 0.75rem;
+    border-radius: 100px;
   }
   
   .alerts-list {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
   }
   
   .alert-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 1rem;
-    border-left: 4px solid #ccc;
-    border-radius: 4px;
-    background: #fafafa;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border-light);
   }
   
-  .severity-critical {
-    border-left-color: #f44336;
-    background: #ffebee;
+  .alert-item:last-child {
+    border-bottom: none;
   }
   
-  .severity-high {
-    border-left-color: #FF9800;
-    background: #fff3e0;
+  .alert-top {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.25rem;
   }
   
-  .severity-medium {
-    border-left-color: #2196F3;
-    background: #e3f2fd;
+  .alert-message {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
   }
   
-  .severity-warning {
-    border-left-color: #FFC107;
-    background: #fffde7;
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
   
-  .alert-content {
+  .loading-spinner {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    border: 3px solid var(--border-light);
+    border-top-color: var(--accent-blue);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  
+  .loading-state {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 2rem;
+    color: var(--text-muted);
+    gap: 0.75rem;
   }
   
-  .alert-type {
-    font-weight: bold;
-    text-transform: uppercase;
-    font-size: 0.8rem;
-    color: #666;
-  }
-  
-  .alert-device {
-    font-size: 0.9rem;
-    color: #2196F3;
-  }
-  
-  .alert-time {
-    font-size: 0.75rem;
-    color: #999;
-  }
-  
-  .ack-btn {
-    background: #4CAF50;
-    color: white;
-    border: none;
-    padding: 0.5rem 1rem;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.85rem;
-  }
-  
-  .ack-btn:hover {
-    background: #388E3C;
-  }
-  
-  .error-message {
-    background: #ffebee;
-    color: #c62828;
-    padding: 1rem;
-    border-radius: 8px;
-    margin-top: 1rem;
+  @media (max-width: 640px) {
+    .alert-item {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.75rem;
+    }
+    
+    .ack-btn {
+      width: 100%;
+    }
   }
 </style>

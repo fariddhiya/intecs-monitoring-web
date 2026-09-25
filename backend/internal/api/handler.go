@@ -97,7 +97,15 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	s.db.QueryRow("SELECT COUNT(*) FROM devices").Scan(&totalDevices)
 	s.db.QueryRow("SELECT COUNT(*) FROM alerts WHERE status = 'active'").Scan(&activeAlerts)
 
-	rows, err := s.db.Query("SELECT device_id, COALESCE(fuel_percentage, 0), COALESCE(temperature, 0), COALESCE(flow_rate, 0), equipment_status, last_seen FROM devices ORDER BY device_id")
+	rows, err := s.db.Query(`
+		SELECT d.device_id, t.fuel_percentage, t.temperature, t.flow_rate, t.equipment_status, d.last_seen
+		FROM devices d
+		LEFT JOIN LATERAL (
+			SELECT fuel_percentage, temperature, flow_rate, equipment_status
+			FROM telemetry WHERE device_id = d.device_id ORDER BY timestamp DESC LIMIT 1
+		) t ON TRUE
+		ORDER BY d.device_id
+	`)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -109,7 +117,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		var d DeviceView
 		var lastSeen time.Time
 		var fuelPct, temp, flow sql.NullFloat64
-		var equipStatus, lastSeenStr string
+		var equipStatus string
 
 		err := rows.Scan(&d.DeviceID, &fuelPct, &temp, &flow, &equipStatus, &lastSeen)
 		if err != nil {
@@ -121,10 +129,9 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		d.Temperature = safeFloat64(temp.Float64)
 		d.FlowRate = safeFloat64(flow.Float64)
 		d.EquipStatus = equipStatus
-		lastSeenStr = lastSeen.Format(time.RFC3339)
+		d.LastSeen = lastSeen.Format(time.RFC3339)
 		d.Connection = computeConnection(lastSeen)
-		d.LastSeen = lastSeenStr
-		d.ID = d.DeviceID // Simplify for prototype
+		d.ID = d.DeviceID
 		d.Site = "Sangatta"
 
 		conn := computeConnection(lastSeen)
@@ -149,7 +156,15 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.db.Query("SELECT device_id, COALESCE(fuel_percentage, 0), COALESCE(temperature, 0), COALESCE(flow_rate, 0), equipment_status, last_seen FROM devices ORDER BY device_id")
+	rows, err := s.db.Query(`
+		SELECT d.device_id, t.fuel_percentage, t.temperature, t.flow_rate, t.equipment_status, d.last_seen
+		FROM devices d
+		LEFT JOIN LATERAL (
+			SELECT fuel_percentage, temperature, flow_rate, equipment_status
+			FROM telemetry WHERE device_id = d.device_id ORDER BY timestamp DESC LIMIT 1
+		) t ON TRUE
+		ORDER BY d.device_id
+	`)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

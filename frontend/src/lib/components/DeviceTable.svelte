@@ -3,19 +3,22 @@
   
   let devices = [];
   let error = null;
+  let loading = true;
 
   async function loadDevices() {
     try {
       const res = await fetch('/api/dashboard');
       if (res.ok) {
         const data = await res.json();
-        devices = data.devices;
+        devices = data.devices || [];
         error = null;
       } else {
         error = 'Failed to load devices';
       }
     } catch (e) {
       error = 'Connection failed: ' + e.message;
+    } finally {
+      loading = false;
     }
   }
 
@@ -25,10 +28,10 @@
   });
 
   function getFuelColor(percent) {
-    if (percent < 10) return '#f44336';
-    if (percent < 20) return '#FF9800';
-    if (percent < 50) return '#FFC107';
-    return '#4CAF50';
+    if (percent < 10) return '#ef4444';
+    if (percent < 20) return '#f59e0b';
+    if (percent < 50) return '#eab308';
+    return '#10b981';
   }
 
   function getConnectionClass(conn) {
@@ -50,153 +53,92 @@
 </script>
 
 <div class="table-container">
-  <h2 style="margin-bottom: 1rem;">Device Status</h2>
+  <div class="table-header">
+    <h2>Device Status</h2>
+  </div>
   
-  <table class="device-table">
-    <thead>
-      <tr>
-        <th>Device</th>
-        <th>Site</th>
-        <th>Fuel</th>
-        <th>Temp</th>
-        <th>Flow Rate</th>
-        <th>Equipment</th>
-        <th>Connection</th>
-        <th>Last Seen</th>
-      </tr>
-    </thead>
-    <tbody>
-      {#each devices as device}
+  {#if loading}
+    <div class="loading-state">
+      <span class="loading-spinner"></span>
+      <span>Loading devices...</span>
+    </div>
+  {:else if error}
+    <div class="error-message" style="margin: 1rem;">&#9888; {error}</div>
+  {:else if devices.length === 0}
+    <div class="no-data">No devices found</div>
+  {:else}
+    <table class="device-table">
+      <thead>
         <tr>
-          <td><a href="/devices/{device.device_id}" class="device-link">{device.device_id}</a></td>
-          <td>{device.site}</td>
-          <td>
-            <span class="fuel-bar" style="width: {Math.max(device.fuel_percent, 5)}%">
-              {Math.round(device.fuel_percent)}%
-            </span>
-            <span class="fuel-value" style="color: {getFuelColor(device.fuel_percent)}">
-              {Math.round(device.fuel_percent)}%
-            </span>
-          </td>
-          <td>{device.temperature.toFixed(1)}°C</td>
-          <td>{device.flow_rate.toFixed(1)} L/min</td>
-          <td>
-            <span class="badge {getEquipClass(device.equipment_status)}">
-              {device.equipment_status}
-            </span>
-          </td>
-          <td>
-            <span class="badge {getConnectionClass(device.connection)}">
-              {device.connection}
-            </span>
-          </td>
-          <td>{device.last_seen ? new Date(device.last_seen).toLocaleTimeString() : '-'}</td>
+          <th>Device</th>
+          <th>Site</th>
+          <th>Fuel</th>
+          <th>Temp</th>
+          <th>Flow Rate</th>
+          <th>Equipment</th>
+          <th>Connection</th>
+          <th>Last Seen</th>
         </tr>
-      {:else}
-        <tr>
-          <td colspan="8" class="no-data">No devices found</td>
-        </tr>
-      {/each}
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        {#each devices as device}
+          <tr>
+            <td><a href="/devices/{device.device_id}" class="device-link">{device.device_id}</a></td>
+            <td>{device.site || '-'}</td>
+            <td>
+              <div class="fuel-container">
+                <div class="fuel-bar-track">
+                  <div class="fuel-bar-fill" style="width: {Math.max(device.fuel_percent, 2)}%; background: {getFuelColor(device.fuel_percent)}"></div>
+                </div>
+                <span class="fuel-value" style="color: {getFuelColor(device.fuel_percent)}">{Math.round(device.fuel_percent)}%</span>
+              </div>
+            </td>
+            <td style={device.temperature > 85 ? 'color: #ef4444; font-weight: 600;' : ''}>{device.temperature.toFixed(1)}&deg;C</td>
+            <td>{device.flow_rate.toFixed(1)} L/min</td>
+            <td><span class="badge {getEquipClass(device.equipment_status)}">{device.equipment_status}</span></td>
+            <td>
+              <span class="badge {getConnectionClass(device.connection)}">
+                <span class="badge-dot"></span>
+                {device.connection}
+              </span>
+            </td>
+            <td style="color: var(--text-secondary); font-size: 0.85rem;">{device.last_seen ? new Date(device.last_seen).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '-'}</td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  {/if}
 </div>
 
 <style>
-  .table-container {
-    background: white;
-    border-radius: 8px;
-    padding: 1.5rem;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    overflow-x: auto;
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
   }
   
-  .device-table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-  
-  .device-table th {
-    text-align: left;
-    padding: 0.75rem;
-    border-bottom: 2px solid #eee;
-    color: #666;
-    font-weight: 600;
-    font-size: 0.85rem;
-    text-transform: uppercase;
-  }
-  
-  .device-table td {
-    padding: 0.75rem;
-    border-bottom: 1px solid #f5f5f5;
-    vertical-align: middle;
-  }
-  
-  .device-link {
-    color: #2196F3;
-    text-decoration: none;
-    font-weight: 500;
-  }
-  
-  .device-link:hover {
-    text-decoration: underline;
-  }
-  
-  .fuel-value {
-    font-weight: bold;
-    margin-right: 0.5rem;
-  }
-  
-  .fuel-bar {
+  .loading-spinner {
     display: inline-block;
-    height: 6px;
-    border-radius: 3px;
-    background: #e0e0e0;
-    margin-right: 0.5rem;
-    vertical-align: middle;
-    position: relative;
+    width: 24px;
+    height: 24px;
+    border: 3px solid var(--border-light);
+    border-top-color: var(--accent-blue);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
   }
   
-  .badge {
-    padding: 0.25rem 0.75rem;
-    border-radius: 12px;
-    font-size: 0.8rem;
-    font-weight: 500;
-    text-transform: capitalize;
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
   
-  .status-online {
-    background: #e8f5e9;
-    color: #2e7d32;
-  }
-  
-  .status-stale {
-    background: #fff3e0;
-    color: #ef6c00;
-  }
-  
-  .status-offline {
-    background: #ffebee;
-    color: #c62828;
-  }
-  
-  .equip-running {
-    background: #e3f2fd;
-    color: #1565c0;
-  }
-  
-  .equip-idle {
-    background: #f3e5f5;
-    color: #6a1b9a;
-  }
-  
-  .equip-maintenance {
-    background: #eceff1;
-    color: #455a64;
-  }
-  
-  .no-data {
-    text-align: center;
-    padding: 2rem !important;
-    color: #999;
+  .loading-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 2rem;
+    color: var(--text-muted);
+    gap: 0.75rem;
   }
 </style>

@@ -3,10 +3,9 @@
 </script>
 
 <svelte:head>
-  <title>Devices - IoT Monitoring</title>
+  <title>Devices - INTECS Monitoring</title>
 </svelte:head>
 
-<main>
-  <h1 style="margin-bottom: 1.5rem; font-size: 1.8rem;">All Devices</h1>
-  <DeviceTable />
-</main>
+<h1 class="page-title">All Devices</h1>
+
+<DeviceTable />

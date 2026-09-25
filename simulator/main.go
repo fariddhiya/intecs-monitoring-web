@@ -25,14 +25,14 @@ type Telemetry struct {
 }
 
 type DeviceState struct {
-	DeviceID      string
-	FuelPercent   float64
-	FuelLevel     float64
-	Temperature   float64
-	FlowRate      float64
-	EquipStatus   string
+	DeviceID          string
+	FuelPercent       float64
+	FuelLevel         float64
+	Temperature       float64
+	FlowRate          float64
+	EquipStatus       string
 	StatusChangeTimer int
-	RunTimer      int
+	RunTimer          int
 }
 
 var equipmentStatuses = []string{"running", "idle", "maintenance"}
@@ -58,10 +58,26 @@ func main() {
 
 	client := mqtt.NewClient(opts)
 	token := client.Connect()
-	token.WaitTimeout(10 * time.Second)
-	if token.Error != nil {
-		log.Fatalf("Failed to connect to MQTT broker: %v", token.Error)
+	if !token.WaitTimeout(15 * time.Second) {
+		log.Println("Connect timeout, retrying...")
+		for i := 0; i < 30; i++ {
+			time.Sleep(1 * time.Second)
+			if client.IsConnected() {
+				break
+			}
+		}
 	}
+
+	maxWait := 60
+	for i := 0; i < maxWait && !client.IsConnected(); i++ {
+		time.Sleep(1 * time.Second)
+	}
+
+	if !client.IsConnected() {
+		log.Fatal("Failed to connect to MQTT broker")
+	}
+
+	log.Println("Simulator running... Press Ctrl+C to stop")
 
 	states := make([]DeviceState, deviceCount)
 	for i := 0; i < deviceCount; i++ {
@@ -78,7 +94,6 @@ func main() {
 		go simulateDevice(&states[i], siteID, client, publishInterval)
 	}
 
-	log.Println("Simulator running... Press Ctrl+C to stop")
 	select {}
 }
 
@@ -103,11 +118,7 @@ func simulateDevice(state *DeviceState, siteID string, client mqtt.Client, inter
 		}
 
 		topic := fmt.Sprintf("intecs/site/%s/device/%s/telemetry", siteID, state.DeviceID)
-		token := client.Publish(topic, 1, false, data)
-		token.WaitTimeout(3 * time.Second)
-		if token.Error != nil {
-			log.Printf("Error publishing to %s: %v", topic, token.Error)
-		}
+		client.Publish(topic, 1, false, data)
 	}
 }
 
@@ -115,7 +126,6 @@ func updateState(state *DeviceState) {
 	state.RunTimer++
 	state.StatusChangeTimer++
 
-	// Fuel decreases slowly over time (simulates usage)
 	fuelDecay := 0.05 + rand.Float64()*0.1
 	state.FuelPercent -= fuelDecay
 	if state.FuelPercent < 5 {
@@ -123,7 +133,6 @@ func updateState(state *DeviceState) {
 	}
 	state.FuelLevel = state.FuelPercent * 100
 
-	// Temperature fluctuates in realistic range
 	tempChange := (rand.Float64() - 0.5) * 2
 	state.Temperature += tempChange
 	if state.Temperature < 60 {
@@ -132,7 +141,6 @@ func updateState(state *DeviceState) {
 		state.Temperature = 70 + rand.Float64()*10
 	}
 
-	// Flow rate varies based on status
 	switch state.EquipStatus {
 	case "running":
 		state.FlowRate = 25 + rand.Float64()*30
@@ -142,7 +150,6 @@ func updateState(state *DeviceState) {
 		state.FlowRate = 0
 	}
 
-	// Equipment status changes occasionally
 	if state.StatusChangeTimer >= 30+rand.Intn(30) {
 		state.StatusChangeTimer = 0
 		currentIdx := indexOf(equipmentStatuses, state.EquipStatus)

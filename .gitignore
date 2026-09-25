@@ -24,3 +24,7 @@ vendor/
 
 # Docker compose env
 .env.*.local
+
+# SvelteKit generated
+generic .svelte-kit/
+

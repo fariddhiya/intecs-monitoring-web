@@ -1,90 +1,89 @@
 <script>
-  let stats = { total_devices: 0, online_devices: 0, offline_devices: 0, active_alerts: 0 };
-  let error = null;
-
-  async function loadStats() {
-    try {
-      const res = await fetch('/api/dashboard');
-      if (res.ok) {
-        const data = await res.json();
-        stats = data;
-        error = null;
-      } else {
-        error = 'Failed to load dashboard data';
-      }
-    } catch (e) {
-      error = 'Connection failed: ' + e.message;
-    }
+  export let label = '';
+  export let value = '--';
+  export let colorClass = '';
+  export let icon = '';
+  
+  let loading = true;
+  
+  $: {
+    loading = false;
   }
-
-  loadStats();
-  setInterval(loadStats, 5000);
 </script>
 
-<div class="stats-grid">
-  <div class="stat-card stat-total">
-    <div class="stat-value">{stats.total_devices}</div>
-    <div class="stat-label">Total Devices</div>
+<div class="stat-card {colorClass}">
+  <div class="stat-header">
+    {#if icon}
+      <span class="stat-icon">{icon}</span>
+    {/if}
+    <span class="stat-label">{label}</span>
   </div>
-  
-  <div class="stat-card stat-online">
-    <div class="stat-value">{stats.online_devices}</div>
-    <div class="stat-label">Online</div>
-  </div>
-  
-  <div class="stat-card stat-offline">
-    <div class="stat-value">{stats.offline_devices}</div>
-    <div class="stat-label">Offline</div>
-  </div>
-  
-  <div class="stat-card stat-alerts">
-    <div class="stat-value">{stats.active_alerts}</div>
-    <div class="stat-label">Active Alerts</div>
-  </div>
+  {#if loading}
+    <span class="loading-spinner" style="margin-top: 0.5rem;"></span>
+  {:else}
+    <div class="stat-value">{value}</div>
+  {/if}
 </div>
 
-{#if error}
-  <div class="error-message">⚠️ {error}</div>
-{/if}
-
 <style>
-  .stats-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1rem;
-    margin-bottom: 2rem;
-  }
-  
   .stat-card {
-    background: white;
-    border-radius: 8px;
-    padding: 1.5rem;
-    text-align: center;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem 1.5rem;
+    border: 1px solid var(--border-light);
+    box-shadow: var(--shadow-sm);
+    transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
   }
   
-  .stat-value {
-    font-size: 2.5rem;
-    font-weight: bold;
-    color: #333;
+  .stat-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+  }
+  
+  .stat-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  
+  .stat-icon {
+    font-size: 1.25rem;
   }
   
   .stat-label {
-    font-size: 0.9rem;
-    color: #666;
-    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
   
-  .stat-total .stat-value { color: #2196F3; }
-  .stat-online .stat-value { color: #4CAF50; }
-  .stat-offline .stat-value { color: #f44336; }
-  .stat-alerts .stat-value { color: #FF9800; }
+  .stat-value {
+    font-size: 1.875rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.2;
+  }
   
-  .error-message {
-    background: #ffebee;
-    color: #c62828;
-    padding: 1rem;
-    border-radius: 8px;
-    margin-bottom: 1rem;
+  .stat-total .stat-value { color: var(--accent-blue); }
+  .stat-online .stat-value { color: var(--success); }
+  .stat-offline .stat-value { color: var(--danger); }
+  .stat-alerts .stat-value { color: var(--warning); }
+  
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  
+  .loading-spinner {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border-medium);
+    border-top-color: var(--accent-blue);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
   }
 </style>
