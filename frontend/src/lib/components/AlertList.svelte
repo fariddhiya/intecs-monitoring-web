@@ -117,11 +117,20 @@
   }
 
   function handlePageSizeChange(e) {
-    pageSize = Number(e.target.value);
-    activePage = 1;
-    historyPage = 1;
-    loadAlerts();
-    loadHistory();
+    const newValue = Number(e.target.value);
+    console.log('[Alert Page Size] OLD:', pageSize, 'TYPE:', typeof pageSize);
+    console.log('[Alert Page Size] NEW (from DOM):', e.target.value, 'TYPE:', typeof e.target.value);
+    console.log('[Alert Page Size] CONVERTED:', newValue, 'TYPE:', typeof newValue);
+    if (newValue !== pageSize) {
+      console.log('[Alert Page Size] CHANGED — applying...');
+      pageSize = newValue;
+      activePage = 1;
+      historyPage = 1;
+      loadAlerts();
+      loadHistory();
+    } else {
+      console.log('[Alert Page Size] NO CHANGE — skipping reload');
+    }
   }
 
   function getSeverityClass(severity) {
@@ -273,7 +282,7 @@
         <span class="info-text">
           Showing {((activeTab === 'active' ? activePage : historyPage) - 1) * pageSize + 1}–{Math.min((activeTab === 'active' ? activePage : historyPage) * pageSize, activeCount + historyCount)} of {activeTab === 'active' ? activeCount : historyCount} alerts
         </span>
-        <select class="page-size-select" bind:value={pageSize} on:change={handlePageSizeChange}>
+        <select class="page-size-select" value={String(pageSize)} on:change={handlePageSizeChange}>
           <option value="5">5 per page</option>
           <option value="10">10 per page</option>
           <option value="15">15 per page</option>

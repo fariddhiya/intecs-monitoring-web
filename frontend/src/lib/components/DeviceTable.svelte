@@ -16,6 +16,7 @@
   let totalItems = $state(0);
 
   async function loadDevices() {
+    console.log('[loadDevices] page:', currentPage, 'page_size:', pageSize);
     loading = true;
     try {
       const params = new URLSearchParams();
@@ -30,17 +31,20 @@
       const res = await fetch(`/api/devices?${params}`);
       if (res.ok) {
         const data = await res.json();
+        let sourceData;
         if (data.data) {
-          allDevices = data.data;
-          devices = allDevices;
+          sourceData = data.data;
           totalPages = data.total_pages || 1;
           totalItems = data.total_items || 0;
         } else {
-          allDevices = data;
-          devices = allDevices;
+          sourceData = data;
           totalPages = 1;
           totalItems = data.length;
         }
+        allDevices = sourceData;
+        const filtered = applyFilters(sourceData);
+        applySorting(filtered);
+        devices = filtered;
         error = null;
       } else {
         error = 'Failed to load devices';
@@ -52,20 +56,19 @@
     }
   }
 
-  $effect(() => {
-    applyFilters();
-  });
-
-  function applyFilters() {
-    devices = [...allDevices];
+  function applyFilters(sourceDevices) {
+    const filtered = [...sourceDevices];
     
     // Apply in-memory filters for connection status
     if (filterConnection) {
-      devices = devices.filter(d => d.connection === filterConnection);
+      return filtered.filter(d => d.connection === filterConnection);
     }
     
-    // Sort
-    devices.sort((a, b) => {
+    return filtered;
+  }
+
+  function applySorting(devicesList) {
+    devicesList.sort((a, b) => {
       let valA = a[sortColumn] ?? '';
       let valB = b[sortColumn] ?? '';
       
@@ -198,9 +201,19 @@
   }
 
   function handlePageSizeChange(e) {
-    pageSize = Number(e.target.value);
-    currentPage = 1;
-    loadDevices();
+    const newValue = Number(e.target.value);
+    console.log('[Page Size] OLD:', pageSize, 'TYPE:', typeof pageSize);
+    console.log('[Page Size] NEW (from DOM):', e.target.value, 'TYPE:', typeof e.target.value);
+    console.log('[Page Size] CONVERTED:', newValue, 'TYPE:', typeof newValue);
+    console.trace('[Page Size] Stack trace');
+    if (newValue !== pageSize) {
+      console.log('[Page Size] CHANGED — applying...');
+      pageSize = newValue;
+      currentPage = 1;
+      loadDevices();
+    } else {
+      console.log('[Page Size] NO CHANGE — skipping reload');
+    }
   }
 
   onMount(() => {
@@ -317,7 +330,7 @@
         <span class="info-text">
           Showing {((currentPage - 1) * pageSize) + 1}–{Math.min(currentPage * pageSize, totalItems)} of {totalItems} devices
         </span>
-        <select class="page-size-select" bind:value={pageSize} on:change={handlePageSizeChange}>
+        <select class="page-size-select" value={String(pageSize)} on:change={handlePageSizeChange}>
           <option value="5">5 per page</option>
           <option value="10">10 per page</option>
           <option value="15">15 per page</option>
