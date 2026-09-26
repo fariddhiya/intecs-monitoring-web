@@ -37,6 +37,91 @@ type DeviceState struct {
 
 var equipmentStatuses = []string{"running", "idle", "maintenance"}
 
+// SimulationConfig holds all configurable randomization parameters for telemetry simulation.
+type SimulationConfig struct {
+	FuelPercentMin    float64
+	FuelPercentMax    float64
+	FuelDecayMin      float64
+	FuelDecayMax      float64
+	TemperatureMin    float64
+	TemperatureMax    float64
+	TemperatureChange float64
+	RunningFlowMin    float64
+	RunningFlowMax    float64
+	IdleFlowMin       float64
+	IdleFlowMax       float64
+	StatusChangeMin   int
+	StatusChangeMax   int
+}
+
+func loadSimulationConfig() SimulationConfig {
+	config := SimulationConfig{
+		FuelPercentMin:    getEnvFloat("FUEL_PERCENT_MIN", 50),
+		FuelPercentMax:    getEnvFloat("FUEL_PERCENT_MAX", 90),
+		FuelDecayMin:      getEnvFloat("FUEL_DECAY_MIN", 0.05),
+		FuelDecayMax:      getEnvFloat("FUEL_DECAY_MAX", 0.15),
+		TemperatureMin:    getEnvFloat("TEMPERATURE_MIN", 60),
+		TemperatureMax:    getEnvFloat("TEMPERATURE_MAX", 95),
+		TemperatureChange: getEnvFloat("TEMPERATURE_CHANGE", 2),
+		RunningFlowMin:    getEnvFloat("RUNNING_FLOW_MIN", 25),
+		RunningFlowMax:    getEnvFloat("RUNNING_FLOW_MAX", 55),
+		IdleFlowMin:       getEnvFloat("IDLE_FLOW_MIN", 5),
+		IdleFlowMax:       getEnvFloat("IDLE_FLOW_MAX", 15),
+		StatusChangeMin:   getEnvInt("STATUS_CHANGE_MIN", 30),
+		StatusChangeMax:   getEnvInt("STATUS_CHANGE_MAX", 60),
+	}
+
+	if err := validateConfig(&config); err != nil {
+		log.Fatalf("Invalid simulation configuration: %v", err)
+	}
+
+	return config
+}
+
+func validateConfig(config *SimulationConfig) error {
+	type violation struct {
+		field string
+		msg   string
+	}
+
+	var violations []violation
+
+	checkMinMax := func(fieldMin, fieldMax string, min, max float64) {
+		if min < 0 {
+			violations = append(violations, violation{fieldMin, fmt.Sprintf("%s=%.2f cannot be negative", fieldMin, min)})
+		}
+		if min > max {
+			violations = append(violations, violation{fmt.Sprintf("%s vs %s", fieldMin, fieldMax), fmt.Sprintf("%s (%.2f) must not exceed %s (%.2f)", fieldMin, min, fieldMax, max)})
+		}
+	}
+
+	checkMinMax("FuelPercentMin", "FuelPercentMax", config.FuelPercentMin, config.FuelPercentMax)
+	checkMinMax("FuelDecayMin", "FuelDecayMax", config.FuelDecayMin, config.FuelDecayMax)
+	checkMinMax("TemperatureMin", "TemperatureMax", config.TemperatureMin, config.TemperatureMax)
+	checkMinMax("RunningFlowMin", "RunningFlowMax", config.RunningFlowMin, config.RunningFlowMax)
+	checkMinMax("IdleFlowMin", "IdleFlowMax", config.IdleFlowMin, config.IdleFlowMax)
+
+	if config.StatusChangeMin < 1 {
+		violations = append(violations, violation{"StatusChangeMin", fmt.Sprintf("must be >= 1, got %d", config.StatusChangeMin)})
+	}
+	if config.StatusChangeMax < 1 {
+		violations = append(violations, violation{"StatusChangeMax", fmt.Sprintf("must be >= 1, got %d", config.StatusChangeMax)})
+	}
+	if config.StatusChangeMin > config.StatusChangeMax {
+		violations = append(violations, violation{"StatusChangeMin vs StatusChangeMax",
+			fmt.Sprintf("%d must not exceed %d", config.StatusChangeMin, config.StatusChangeMax)})
+	}
+
+	if len(violations) > 0 {
+		for _, v := range violations {
+			fmt.Fprintf(os.Stderr, "  - %s: %s\n", v.field, v.msg)
+		}
+		return fmt.Errorf("configuration validation failed (%d violations)", len(violations))
+	}
+
+	return nil
+}
+
 func main() {
 	_ = godotenv.Load()
 
@@ -44,14 +129,17 @@ func main() {
 	publishInterval := getEnvDuration("PUBLISH_INTERVAL", 5*time.Second)
 	siteID := getEnvOrDefault("SITE_ID", "sangatta")
 
+	config := loadSimulationConfig()
+
 	log.Printf("Starting IoT Simulator with %d devices, interval=%v, site=%s", deviceCount, publishInterval, siteID)
+	printConfigSummary(config)
 
 	brokerURL := getEnvOrDefault("MQTT_BROKER_URL", "tcp://localhost:1883")
 	mqttUser := getEnvOrDefault("MQTT_USERNAME", "intecs")
 	mqttPass := getEnvOrDefault("MQTT_PASSWORD", "intecs123")
 
 	var client mqtt.Client
-	
+
 	for attempts := 0; ; attempts++ {
 		opts := mqtt.NewClientOptions().
 			AddBroker(brokerURL).
@@ -61,15 +149,15 @@ func main() {
 
 		client = mqtt.NewClient(opts)
 		token := client.Connect()
-		
-		if token.WaitTimeout(15 * time.Second) && client.IsConnected() {
+
+		if token.WaitTimeout(15*time.Second) && client.IsConnected() {
 			break
 		}
-		
+
 		if client.IsConnected() {
 			break
 		}
-		
+
 		log.Printf("MQTT connect attempt %d failed, retrying in 3s...", attempts+1)
 		time.Sleep(3 * time.Second)
 	}
@@ -80,24 +168,34 @@ func main() {
 	for i := 0; i < deviceCount; i++ {
 		deviceID := fmt.Sprintf("DT-%03d", i+1)
 		states[i] = DeviceState{
-			DeviceID:      deviceID,
-			FuelPercent:   50 + rand.Float64()*40,
-			FuelLevel:     2500 + rand.Float64()*2500,
-			Temperature:   70 + rand.Float64()*20,
-			FlowRate:      20 + rand.Float64()*30,
-			EquipStatus:   "running",
-			RunTimer:      rand.Intn(10),
+			DeviceID:    deviceID,
+			FuelPercent: randomFloat(config.FuelPercentMin, config.FuelPercentMax),
+			FuelLevel:   randomFloat(config.FuelPercentMin, config.FuelPercentMax) * 100,
+			Temperature: randomFloat(config.TemperatureMin, config.TemperatureMax),
+			FlowRate:    randomFloat(config.RunningFlowMin, config.RunningFlowMax),
+			EquipStatus: "running",
+			RunTimer:    rand.Intn(10),
 		}
-		go simulateDevice(&states[i], siteID, client, publishInterval)
+		go simulateDevice(&states[i], siteID, client, publishInterval, config)
 	}
 
 	select {}
 }
 
-func simulateDevice(state *DeviceState, siteID string, client mqtt.Client, interval time.Duration) {
+func printConfigSummary(config SimulationConfig) {
+	log.Println("Simulation configuration:")
+	log.Printf("  Fuel: %.0f-%.0f%%", config.FuelPercentMin, config.FuelPercentMax)
+	log.Printf("  Fuel decay: %.2f-%.2f/%%tick", config.FuelDecayMin, config.FuelDecayMax)
+	log.Printf("  Temperature: %.0f-%.0f°C", config.TemperatureMin, config.TemperatureMax)
+	log.Printf("  Running flow: %.0f-%.0f", config.RunningFlowMin, config.RunningFlowMax)
+	log.Printf("  Idle flow: %.0f-%.0f", config.IdleFlowMin, config.IdleFlowMax)
+	log.Printf("  Status change: %d-%d ticks", config.StatusChangeMin, config.StatusChangeMax)
+}
+
+func simulateDevice(state *DeviceState, siteID string, client mqtt.Client, interval time.Duration, config SimulationConfig) {
 	ticker := time.NewTicker(interval)
 	for range ticker.C {
-		updateState(state)
+		updateState(state, config)
 		payload := Telemetry{
 			DeviceID:    state.DeviceID,
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
@@ -119,35 +217,36 @@ func simulateDevice(state *DeviceState, siteID string, client mqtt.Client, inter
 	}
 }
 
-func updateState(state *DeviceState) {
+func updateState(state *DeviceState, config SimulationConfig) {
 	state.RunTimer++
 	state.StatusChangeTimer++
 
-	fuelDecay := 0.05 + rand.Float64()*0.1
+	fuelDecay := randomFloat(config.FuelDecayMin, config.FuelDecayMax)
 	state.FuelPercent -= fuelDecay
-	if state.FuelPercent < 5 {
-		state.FuelPercent = 5 + rand.Float64()*5
+	if state.FuelPercent < config.FuelPercentMin {
+		state.FuelPercent = randomFloat(config.FuelPercentMin, config.FuelPercentMin+5)
 	}
 	state.FuelLevel = state.FuelPercent * 100
 
-	tempChange := (rand.Float64() - 0.5) * 2
+	tempChange := (rand.Float64() - 0.5) * 2 * config.TemperatureChange
 	state.Temperature += tempChange
-	if state.Temperature < 60 {
-		state.Temperature = 60 + rand.Float64()*10
-	} else if state.Temperature > 95 {
-		state.Temperature = 70 + rand.Float64()*10
+	if state.Temperature < config.TemperatureMin {
+		state.Temperature = randomFloat(config.TemperatureMin, config.TemperatureMin+10)
+	} else if state.Temperature > config.TemperatureMax {
+		state.Temperature = randomFloat(config.TemperatureMin, config.TemperatureMin+10)
 	}
 
 	switch state.EquipStatus {
 	case "running":
-		state.FlowRate = 25 + rand.Float64()*30
+		state.FlowRate = randomFloat(config.RunningFlowMin, config.RunningFlowMax)
 	case "idle":
-		state.FlowRate = 5 + rand.Float64()*10
+		state.FlowRate = randomFloat(config.IdleFlowMin, config.IdleFlowMax)
 	case "maintenance":
 		state.FlowRate = 0
 	}
 
-	if state.StatusChangeTimer >= 30+rand.Intn(30) {
+	statusChangeInterval := config.StatusChangeMin + rand.Intn(config.StatusChangeMax-config.StatusChangeMin+1)
+	if state.StatusChangeTimer >= statusChangeInterval {
 		state.StatusChangeTimer = 0
 		currentIdx := indexOf(equipmentStatuses, state.EquipStatus)
 		nextIdx := (currentIdx + 1) % len(equipmentStatuses)
@@ -156,6 +255,10 @@ func updateState(state *DeviceState) {
 		}
 		state.EquipStatus = equipmentStatuses[nextIdx]
 	}
+}
+
+func randomFloat(min, max float64) float64 {
+	return min + rand.Float64()*(max-min)
 }
 
 func indexOf(slice []string, item string) int {
@@ -181,6 +284,18 @@ func getEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+func getEnvFloat(key string, fallback float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.ParseFloat(v, 64)
 	if err != nil {
 		return fallback
 	}
