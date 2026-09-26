@@ -152,7 +152,10 @@
     if (reconnectTimer) return;
     const maxAttempts = 20;
     wsReconnectAttempts++;
-    const delay = Math.min(1000 * Math.pow(2, Math.min(wsReconnectAttempts, maxAttempts)), 60000);
+    const delay = Math.min(
+      1000 * Math.pow(2, Math.min(wsReconnectAttempts, maxAttempts)),
+      60000,
+    );
     console.log(`Reconnecting in ${delay}ms (attempt ${wsReconnectAttempts})`);
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
@@ -215,23 +218,25 @@
         >Alerts</a
       >
     </div>
-    {#if isAuthenticated}
-      <div class="nav-user">
-        <span class="user-email">&#128100; {user?.email || "Admin"}</span>
-        <button class="logout-btn" on:click={logout}>Logout</button>
-      </div>
-    {/if}
-    <button
-      class="theme-toggle"
-      on:click={toggleDarkMode}
-      title="Toggle dark mode"
-    >
-      {#if darkMode}
-        &#9788;
-      {:else}
-        &#9790;
+    <div>
+      {#if isAuthenticated}
+        <div class="nav-user">
+          <span class="user-email">&#128100; {user?.email || "Admin"}</span>
+          <button class="logout-btn" on:click={logout}>Logout</button>
+        </div>
       {/if}
-    </button>
+      <button
+        class="theme-toggle"
+        on:click={toggleDarkMode}
+        title="Toggle dark mode"
+      >
+        {#if darkMode}
+          &#9788;
+        {:else}
+          &#9790;
+        {/if}
+      </button>
+    </div>
   </div>
 </nav>
 
@@ -277,7 +282,7 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    margin-right: 0.5rem;
+    margin-right: 1rem;
     background-color: red;
   }
 
