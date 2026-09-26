@@ -18,6 +18,12 @@
   let tempCanvas = null;
   let chartLoaded = false;
   let wsTelemetryHandler = null;
+  let downloading = false;
+  let liveStatus = 'connecting'; // connecting | live | updating | error
+  let lastUpdated = 0;
+  let connectionAttempts = 0;
+  let pollTimerId = null;
+  let deviceTimerId = null;
 
   const rangeOptions = [
     { label: '1 Jam', value: '1h' },
@@ -28,18 +34,31 @@
 
   async function refreshDevice() {
     try {
+      setLiveStatus('updating');
       const res = await fetch(`/api/devices/${deviceId}`);
       if (res.ok) {
         device = await res.json();
         error = null;
+        if (connectionAttempts > 0) {
+          connectionAttempts = 0;
+          setLiveStatus('live');
+        }
       } else {
         if (!device) {
           error = 'Device not found';
+        } else {
+          connectionAttempts++;
+          if (connectionAttempts >= 3) {
+            setError('Unable to retrieve device status.');
+          }
         }
       }
     } catch (e) {
+      connectionAttempts++;
       if (!device) {
-        error = e.message;
+        setError(e.message);
+      } else if (connectionAttempts >= 3) {
+        setError('Unable to retrieve device status.');
       }
     } finally {
       loading = false;
@@ -51,9 +70,59 @@
       const res = await fetch(`/api/devices/${deviceId}/telemetry?range=${timeRange}&limit=500`);
       if (res.ok) {
         telemetry = await res.json();
+        lastUpdated = Date.now();
+        connectionAttempts = 0;
+        
+        if (telemetry.length === 0 && !error) {
+          setLiveStatus('live');
+        } else {
+          setLiveStatus('live');
+        }
+      } else {
+        throw new Error('Failed to load telemetry');
       }
     } catch (e) {
       console.error('Error loading telemetry:', e);
+      connectionAttempts++;
+      if (connectionAttempts >= 3) {
+        setLiveStatus('error');
+      }
+    }
+  }
+
+  async function exportTelemetryCSV() {
+    if (!telemetry.length) return;
+    
+    downloading = true;
+    
+    try {
+      const headers = ['Timestamp', 'Fuel %', 'Fuel Level', 'Temperature °C', 'Flow Rate L/min'];
+      const rows = telemetry.map(t => [
+        t.timestamp,
+        (t.fuel_percent ?? 0).toFixed(2),
+        (t.fuel_level ?? 0).toFixed(2),
+        (t.temperature ?? 0).toFixed(2),
+        (t.flow_rate ?? 0).toFixed(2),
+      ]);
+      
+      const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      
+      const now = new Date().toISOString().split('T')[0];
+      const rangeLabel = rangeOptions.find(o => o.value === timeRange)?.label || timeRange;
+      link.setAttribute('download', `${deviceId}_${rangeLabel}_${now}.csv`);
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Export failed:', e);
+    } finally {
+      downloading = false;
     }
   }
 
@@ -78,7 +147,16 @@
   function updateTimeRange(newRange) {
     timeRange = newRange;
     chartLoaded = false;
+    destroyCharts();
     loadTelemetry();
+  }
+
+  function setLiveStatus(status) {
+    liveStatus = status;
+  }
+
+  function setError(msg) {
+    error = msg;
   }
 
   function formatTime(ts) {
@@ -90,11 +168,13 @@
 
   function getTimeLabel(ts) {
     const d = new Date(ts);
-    const now = new Date();
-    const diffSec = Math.floor((now - d) / 1000);
-    if (diffSec < 60) return `${diffSec}s ago`;
-    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function getRelativeTime(secs) {
+    if (secs < 60) return `${Math.round(secs)}s ago`;
+    if (secs < 3600) return `${Math.round(secs / 60)}m ago`;
+    return `${Math.round(secs / 3600)}h ago`;
   }
 
   function getFuelColor(p) {
@@ -125,6 +205,11 @@
   $: tempWarning = device && device.temperature > 85;
   $: connClass = device ? getConnClass(device.connection) : '';
   $: equipStatus = device?.equipment_status || '-';
+  $: noDataForRange = !loading && telemetry.length === 0 && device !== null;
+  $: liveDotClass = liveStatus === 'live' ? 'live-dot-live' 
+                  : liveStatus === 'updating' ? 'live-dot-updating'
+                  : liveStatus === 'error' ? 'live-dot-error'
+                  : 'live-dot-connecting';
 
   function destroyCharts() {
     if (fuelChart) {
@@ -143,18 +228,17 @@
     const labels = telemetry.map(t => getTimeLabel(t.timestamp));
     const fuelData = telemetry.map(t => t.fuel_percent);
     const tempData = telemetry.map(t => t.temperature);
-    const flowData = telemetry.map(t => t.flow_rate);
 
     if (fuelChart) {
       fuelChart.data.labels = labels;
       fuelChart.data.datasets[0].data = fuelData;
-      fuelChart.update('none');
+      fuelChart.update('default');
     }
 
     if (tempChart) {
       tempChart.data.labels = labels;
       tempChart.data.datasets[0].data = tempData;
-      tempChart.update('none');
+      tempChart.update('default');
     }
   }
 
@@ -172,7 +256,6 @@
     const labels = telemetry.map(t => getTimeLabel(t.timestamp));
     const fuelData = telemetry.map(t => t.fuel_percent);
     const tempData = telemetry.map(t => t.temperature);
-    const flowData = telemetry.map(t => t.flow_rate);
 
     const commonOptions = {
       responsive: true,
@@ -187,16 +270,27 @@
           padding: 10,
           cornerRadius: 8,
           displayColors: true,
+          callbacks: {
+            title: function(items) {
+              if (items.length) {
+                const index = items[0].dataIndex;
+                if (telemetry[index]) {
+                  return new Date(telemetry[index].timestamp).toLocaleString();
+                }
+              }
+              return '';
+            }
+          }
         },
       },
       scales: {
         x: {
-          grid: { color: '#e2e8f0', drawBorder: false },
-          ticks: { color: '#64748b', maxTicksLimit: 10, font: { size: 11 } },
+          grid: { color: 'rgba(148, 163, 184, 0.1)', drawBorder: false },
+          ticks: { color: 'var(--text-muted)', maxTicksLimit: 10, font: { size: 11 } },
         },
         y: {
-          grid: { color: '#e2e8f0', drawBorder: false },
-          ticks: { color: '#64748b', font: { size: 11 } },
+          grid: { color: 'rgba(148, 163, 184, 0.1)', drawBorder: false },
+          ticks: { color: 'var(--text-muted)', font: { size: 11 } },
         },
       },
       elements: {
@@ -260,14 +354,17 @@
   onMount(() => {
     refreshDevice();
     loadTelemetry();
-    setInterval(refreshDevice, 5000);
-    setInterval(loadTelemetry, 15000);
+    
+    deviceTimerId = setInterval(refreshDevice, 5000);
+    pollTimerId = setInterval(loadTelemetry, 15000);
 
     wsTelemetryHandler = (e) => handleWsTelemetry(e);
     window.addEventListener('intecs:telemetry', wsTelemetryHandler);
   });
 
   onDestroy(() => {
+    if (deviceTimerId) clearInterval(deviceTimerId);
+    if (pollTimerId) clearInterval(pollTimerId);
     destroyCharts();
     if (wsTelemetryHandler) {
       window.removeEventListener('intecs:telemetry', wsTelemetryHandler);
@@ -350,38 +447,80 @@
 
     <div class="chart-card">
       <div class="chart-header">
-        <h2>Fuel Percentage History</h2>
-        <div class="range-selector">
-          {#each rangeOptions as opt}
-            <button 
-              class="range-btn {timeRange === opt.value ? 'active' : ''}" 
-              on:click={() => updateTimeRange(opt.value)}>
-              {opt.label}
-            </button>
-          {/each}
+        <div class="chart-title-area">
+          <h2>Fuel Percentage History</h2>
+          <div class="live-status">
+            <span class="live-dot {liveDotClass}"></span>
+            <span class="live-text">
+              {#if liveStatus === 'live'}LIVE{:else if liveStatus === 'updating'}Updating...{:else if liveStatus === 'error'}Connection issue{:else}Connecting...{/if}
+              {#if lastUpdated > 0 && liveStatus !== 'error'}
+                <span class="live-time">Updated {getRelativeTime((Date.now() - lastUpdated) / 1000)}</span>
+              {/if}
+            </span>
+          </div>
+        </div>
+        <div class="chart-controls">
+          <div class="range-selector">
+            {#each rangeOptions as opt}
+              <button 
+                class="range-btn {timeRange === opt.value ? 'active' : ''}" 
+                on:click={() => updateTimeRange(opt.value)}>
+                {opt.label}
+              </button>
+            {/each}
+          </div>
+          <button class="export-btn" on:click={exportTelemetryCSV} disabled={downloading || !telemetry.length}>
+            {#if downloading}&#x21bb; Downloading...{:else}&#128190; Download CSV{/if}
+          </button>
         </div>
       </div>
-      <div class="chart-container">
-        <canvas bind:this={fuelCanvas}></canvas>
-      </div>
+      
+      {#if noDataForRange}
+        <div class="chart-empty-state">No telemetry data available for this time range.</div>
+      {:else}
+        <div class="chart-container">
+          <canvas bind:this={fuelCanvas}></canvas>
+        </div>
+      {/if}
     </div>
 
     <div class="chart-card">
       <div class="chart-header">
-        <h2>Temperature History</h2>
-        <div class="range-selector">
-          {#each rangeOptions as opt}
-            <button 
-              class="range-btn {timeRange === opt.value ? 'active' : ''}" 
-              on:click={() => updateTimeRange(opt.value)}>
-              {opt.label}
-            </button>
-          {/each}
+        <div class="chart-title-area">
+          <h2>Temperature History</h2>
+          <div class="live-status">
+            <span class="live-dot {liveDotClass}"></span>
+            <span class="live-text">
+              {#if liveStatus === 'live'}LIVE{:else if liveStatus === 'updating'}Updating...{:else if liveStatus === 'error'}Connection issue{:else}Connecting...{/if}
+              {#if lastUpdated > 0 && liveStatus !== 'error'}
+                <span class="live-time">Updated {getRelativeTime((Date.now() - lastUpdated) / 1000)}</span>
+              {/if}
+            </span>
+          </div>
+        </div>
+        <div class="chart-controls">
+          <div class="range-selector">
+            {#each rangeOptions as opt}
+              <button 
+                class="range-btn {timeRange === opt.value ? 'active' : ''}" 
+                on:click={() => updateTimeRange(opt.value)}>
+                {opt.label}
+              </button>
+            {/each}
+          </div>
+          <button class="export-btn" on:click={exportTelemetryCSV} disabled={downloading || !telemetry.length}>
+            {#if downloading}&#x21bb; Downloading...{:else}&#128190; Download CSV{/if}
+          </button>
         </div>
       </div>
-      <div class="chart-container">
-        <canvas bind:this={tempCanvas}></canvas>
-      </div>
+      
+      {#if noDataForRange}
+        <div class="chart-empty-state">No telemetry data available for this time range.</div>
+      {:else}
+        <div class="chart-container">
+          <canvas bind:this={tempCanvas}></canvas>
+        </div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -402,10 +541,12 @@
     font-weight: 500;
     font-size: 0.9rem;
     padding: 0.5rem 0;
+    transition: color 0.2s ease;
   }
   
   .back-link:hover {
     text-decoration: underline;
+    color: var(--accent-blue-dark);
   }
   
   /* Header */
@@ -516,7 +657,7 @@
     background: var(--bg-secondary);
     border-radius: var(--radius-lg);
     border: 1px solid var(--border-light);
-    box-shadow: var(--shadow-sm);
+    box-shadow: var(--shadow-md);
     padding: 1.5rem;
     margin-bottom: 2rem;
   }
@@ -524,10 +665,16 @@
   .chart-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     margin-bottom: 1.25rem;
-    flex-wrap: wrap;
     gap: 1rem;
+    flex-wrap: wrap;
+  }
+  
+  .chart-title-area {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
   }
   
   .chart-header h2 {
@@ -536,9 +683,64 @@
     font-weight: 600;
   }
   
+  /* Live Status Indicator */
+  .live-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  
+  .live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  
+  .live-dot-connecting {
+    background: var(--text-muted);
+  }
+  
+  .live-dot-live {
+    background: var(--success);
+    animation: pulse-green 2s infinite;
+  }
+  
+  .live-dot-updating {
+    background: var(--warning);
+  }
+  
+  .live-dot-error {
+    background: var(--danger);
+  }
+  
+  @keyframes pulse-green {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+    50% { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0); }
+  }
+  
+  .live-text {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+  
+  .live-time {
+    margin-left: 0.5rem;
+    opacity: 0.7;
+  }
+  
+  .chart-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  
   .range-selector {
     display: flex;
-    gap: 0.25rem;
+    gap: 2px;
     background: var(--bg-tertiary);
     padding: 3px;
     border-radius: var(--radius-md);
@@ -558,19 +760,53 @@
   
   .range-btn:hover {
     color: var(--text-primary);
-    background: rgba(255, 255, 255, 0.5);
+    background: rgba(128, 128, 128, 0.1);
   }
   
   .range-btn.active {
     background: var(--bg-secondary);
     color: var(--accent-blue);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    font-weight: 600;
+  }
+  
+  .export-btn {
+    background: var(--success-bg);
+    color: var(--success-text);
+    border: 1px solid var(--success);
+    padding: 0.4rem 0.85rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  
+  .export-btn:hover:not(:disabled) {
+    background: var(--success);
+    color: white;
+  }
+  
+  .export-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
   
   .chart-container {
     position: relative;
     height: 250px;
     width: 100%;
+  }
+  
+  .chart-empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    font-style: italic;
   }
   
   @keyframes spin {
@@ -659,8 +895,19 @@
       align-items: flex-start;
     }
     
+    .chart-controls {
+      width: 100%;
+      justify-content: flex-start;
+    }
+    
     .chart-container {
       height: 200px;
+    }
+  }
+  
+  @media (max-width: 640px) {
+    .info-grid {
+      grid-template-columns: 1fr;
     }
   }
 </style>
