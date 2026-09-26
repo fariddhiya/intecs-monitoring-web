@@ -32,12 +32,13 @@ type WSClient struct {
 	mu     sync.Mutex
 }
 
-func (c *WSClient) readPump() {
+func (c *WSClient) readPump(hub *Hub) {
 	defer func() {
+		hub.RemoveClient(c)
 		c.close()
 	}()
 
-	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	c.conn.SetReadDeadline(time.Now().Add(90 * time.Second))
 	c.conn.SetCloseHandler(func(code int, text string) error {
 		switch code {
 		case websocket.CloseGoingAway, websocket.CloseNormalClosure:
@@ -48,8 +49,19 @@ func (c *WSClient) readPump() {
 		return nil
 	})
 
+	pingResetTimer := time.NewTimer(5 * time.Second)
+	defer pingResetTimer.Stop()
+
 	for {
+		pingResetTimer.Reset(5 * time.Second)
 		_, msg, err := c.conn.ReadMessage()
+		
+		select {
+		case <-pingResetTimer.C:
+		default:
+			c.conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+		}
+
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err,
 				websocket.CloseGoingAway, websocket.CloseNormalClosure) {
@@ -57,7 +69,6 @@ func (c *WSClient) readPump() {
 			}
 			break
 		}
-		// Handle pong/reset ping from client
 		_ = msg
 	}
 }
@@ -73,7 +84,6 @@ func (c *WSClient) writePump(hub *Hub) {
 		select {
 		case msg := <-c.send:
 			c.mu.Lock()
-			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 				c.mu.Unlock()
 				return
@@ -81,12 +91,11 @@ func (c *WSClient) writePump(hub *Hub) {
 			c.mu.Unlock()
 		case <-ticker.C:
 			c.mu.Lock()
-			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				c.mu.Unlock()
+			err := c.conn.WriteMessage(websocket.PingMessage, nil)
+			c.mu.Unlock()
+			if err != nil {
 				return
 			}
-			c.mu.Unlock()
 		}
 	}
 }
@@ -141,8 +150,8 @@ func (h *Hub) Run() {
 			for client := range h.clients {
 				select {
 				case client.send <- msg:
-				default:
-					close(client.send)
+				case <-time.After(100 * time.Millisecond):
+					log.Printf("Slow client dropped, send channel full")
 					delete(h.clients, client)
 				}
 			}
@@ -161,7 +170,7 @@ func (h *Hub) AddClient(conn *websocket.Conn) *WSClient {
 	h.mu.Unlock()
 
 	go client.writePump(h)
-	go client.readPump()
+	go client.readPump(h)
 
 	h.updateMQTTStatus()
 

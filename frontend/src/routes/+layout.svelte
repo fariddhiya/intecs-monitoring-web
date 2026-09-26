@@ -124,10 +124,7 @@
       console.log("WebSocket closed:", event.code, event.reason);
       stopHeartbeat();
       ws = null;
-
-      if (!event.wasClean && wsReconnectAttempts < 5) {
-        scheduleReconnect();
-      }
+      scheduleReconnect();
     };
 
     ws.onerror = (error) => {
@@ -153,8 +150,9 @@
 
   function scheduleReconnect() {
     if (reconnectTimer) return;
+    const maxAttempts = 20;
     wsReconnectAttempts++;
-    const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts), 30000);
+    const delay = Math.min(1000 * Math.pow(2, Math.min(wsReconnectAttempts, maxAttempts)), 60000);
     console.log(`Reconnecting in ${delay}ms (attempt ${wsReconnectAttempts})`);
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;

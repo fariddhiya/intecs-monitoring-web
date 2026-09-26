@@ -36,14 +36,8 @@ func handleWebSocket(hub *ws.Hub) http.HandlerFunc {
 		}
 		client.SendMessage(ws.MessageTypeMQTTStatus, statusPayload)
 
-		for {
-			_, _, err := conn.ReadMessage()
-			if err != nil {
-				break
-			}
-		}
-
-		hub.RemoveClient(client)
+		// readPump handles message reading and cleanup via RemoveClient
+		select {}
 	}
 }
 
