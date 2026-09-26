@@ -95,6 +95,27 @@ type AlertView struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type PaginatedResponse struct {
+	Data       interface{} `json:"data"`
+	Page       int         `json:"page"`
+	PageSize   int         `json:"page_size"`
+	TotalItems int         `json:"total_items"`
+	TotalPages int         `json:"total_pages"`
+}
+
+func paginate(totalItems, page, pageSize int) PaginatedResponse {
+	totalPages := (totalItems + pageSize - 1) / pageSize
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	return PaginatedResponse{
+		Page:       page,
+		PageSize:   pageSize,
+		TotalItems: totalItems,
+		TotalPages: totalPages,
+	}
+}
+
 func computeConnection(lastSeen time.Time) string {
 	now := time.Now()
 	diff := now.Sub(lastSeen)
@@ -172,10 +193,27 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
+	pageStr := r.URL.Query().Get("page")
+	pageSizeStr := r.URL.Query().Get("page_size")
+	
+	page := 1
+	pageSize := 20
+	if pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+	if pageSizeStr != "" {
+		if ps, err := strconv.Atoi(pageSizeStr); err == nil && ps > 0 && ps <= 100 {
+			pageSize = ps
+		}
+	}
+	
 	query := `
 		SELECT d.device_id, t.fuel_percentage, t.temperature, t.flow_rate, 
 		       t.equipment_status, d.last_seen, d.name, s.name as site_name
 		FROM devices d
+		LEFT JOIN sites s ON d.site_id = s.id
 		LEFT JOIN LATERAL (
 			SELECT fuel_percentage, temperature, flow_rate, equipment_status
 			FROM telemetry WHERE device_id = d.device_id ORDER BY timestamp DESC LIMIT 1
@@ -186,35 +224,33 @@ func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
 	argCount := 1
 	
 	var conditions []string
+	hasFilter := false
 	
-	// Search by device_id
 	search := r.URL.Query().Get("search")
 	if search != "" {
 		conditions = append(conditions, fmt.Sprintf("d.device_id ILIKE $%d", argCount))
 		args = append(args, "%"+search+"%")
 		argCount++
+		hasFilter = true
 	}
 	
-	// Filter by connection status
 	connStatus := r.URL.Query().Get("connection")
-	if connStatus != "" {
-		// We'll filter in-memory after fetching
-	}
-	
-	// Filter by equipment status
 	equipStatus := r.URL.Query().Get("equipment_status")
 	if equipStatus != "" {
 		conditions = append(conditions, fmt.Sprintf("t.equipment_status = $%d", argCount))
 		args = append(args, equipStatus)
 		argCount++
+		hasFilter = true
 	}
 	
-	// Add conditions to query
+	if connStatus != "" {
+		hasFilter = true
+	}
+	
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 	
-	// Sort
 	sortCol := r.URL.Query().Get("sort")
 	sortDir := r.URL.Query().Get("dir")
 	if sortCol == "" {
@@ -225,7 +261,6 @@ func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
 		sortDir = "ASC"
 	}
 	
-	// Map sort columns
 	sortMap := map[string]string{
 		"device_id":     "d.device_id",
 		"site":          "s.name",
@@ -243,14 +278,17 @@ func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
 	
 	query += fmt.Sprintf(" ORDER BY %s %s", sortedCol, sortDir)
 	
-	rows, err := s.db.Query(query, args...)
+	offset := (page - 1) * pageSize
+	paginatedQuery := query + fmt.Sprintf(" OFFSET %d LIMIT %d", offset, pageSize)
+	
+	rows, err := s.db.Query(paginatedQuery, args...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
-	var devices []DeviceView
+	devices := []DeviceView{}
 	for rows.Next() {
 		var d DeviceView
 		var lastSeen time.Time
@@ -278,7 +316,6 @@ func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
 			d.Site = "Unknown"
 		}
 		
-		// Apply connection filter if requested
 		if connStatus != "" && d.Connection != connStatus {
 			continue
 		}
@@ -286,7 +323,32 @@ func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
 		devices = append(devices, d)
 	}
 
-	writeJSON(w, devices)
+	totalItems := len(devices)
+	totalPages := 1
+	if !hasFilter {
+		var totalCount int
+		err := s.db.QueryRow("SELECT COUNT(*) FROM devices").Scan(&totalCount)
+		if err == nil {
+			totalItems = totalCount
+			totalPages = (totalCount + pageSize - 1) / pageSize
+			if totalPages < 1 {
+				totalPages = 1
+			}
+		}
+	} else {
+		totalPages = (totalItems + pageSize - 1) / pageSize
+		if totalPages < 1 {
+			totalPages = 1
+		}
+	}
+
+	writeJSON(w, PaginatedResponse{
+		Data:       devices,
+		Page:       page,
+		PageSize:   pageSize,
+		TotalItems: totalItems,
+		TotalPages: totalPages,
+	})
 }
 
 func (s *Server) handleDeviceByID(w http.ResponseWriter, r *http.Request) {
@@ -338,11 +400,23 @@ func (s *Server) handleDeviceTelemetry(w http.ResponseWriter, r *http.Request) {
 	rangeStr := r.URL.Query().Get("range")
 	limitStr := r.URL.Query().Get("limit")
 
-	timeRange, pointsPerRange := parseTimeRange(rangeStr)
+	var timeRange time.Duration
+	switch rangeStr {
+	case "1h":
+		timeRange = time.Hour
+	case "6h":
+		timeRange = 6 * time.Hour
+	case "24h":
+		timeRange = 24 * time.Hour
+	case "7d":
+		timeRange = 7 * 24 * time.Hour
+	default:
+		timeRange = 24 * time.Hour
+	}
 
-	limit := pointsPerRange
+	limit := 500
 	if limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 500 {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
 			limit = l
 		}
 	}
@@ -388,34 +462,45 @@ func (s *Server) handleDeviceTelemetry(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, telements)
 }
 
-func parseTimeRange(rangeStr string) (time.Duration, int) {
-	switch rangeStr {
-	case "1h":
-		return time.Hour, 60
-	case "6h":
-		return 6 * time.Hour, 72
-	case "24h":
-		return 24 * time.Hour, 288
-	case "7d":
-		return 7 * 24 * time.Hour, 1008
-	default:
-		return 24 * time.Hour, 288
-	}
-}
-
 func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
+	pageStr := r.URL.Query().Get("page")
+	pageSizeStr := r.URL.Query().Get("page_size")
+	
+	page := 1
+	pageSize := 20
+	if pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+	if pageSizeStr != "" {
+		if ps, err := strconv.Atoi(pageSizeStr); err == nil && ps > 0 && ps <= 100 {
+			pageSize = ps
+		}
+	}
+	
 	status := r.URL.Query().Get("status")
+	countQuery := "SELECT COUNT(*) FROM alerts"
 	query := "SELECT id, device_id, type, severity, message, status, created_at FROM alerts"
 	args := []interface{}{}
 	argCount := 1
 
 	if status != "" {
+		countQuery += fmt.Sprintf(" WHERE status = $%d", argCount)
 		query += fmt.Sprintf(" WHERE status = $%d", argCount)
 		args = append(args, status)
 		argCount++
 	}
 
-	query += " ORDER BY created_at DESC LIMIT 50"
+	var totalCount int
+	err := s.db.QueryRow(countQuery, args...).Scan(&totalCount)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	offset := (page - 1) * pageSize
+	query += fmt.Sprintf(" ORDER BY created_at DESC OFFSET %d LIMIT %d", offset, pageSize)
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -424,7 +509,7 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var alerts []AlertView
+	alerts := []AlertView{}
 	for rows.Next() {
 		var a AlertView
 		var createdAt time.Time
@@ -436,7 +521,18 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		alerts = append(alerts, a)
 	}
 
-	writeJSON(w, alerts)
+	totalPages := (totalCount + pageSize - 1) / pageSize
+	if totalPages < 1 {
+		totalPages = 1
+	}
+
+	writeJSON(w, PaginatedResponse{
+		Data:       alerts,
+		Page:       page,
+		PageSize:   pageSize,
+		TotalItems: totalCount,
+		TotalPages: totalPages,
+	})
 }
 
 func (s *Server) handleAckAlert(w http.ResponseWriter, r *http.Request) {
@@ -453,16 +549,26 @@ func (s *Server) handleAckAlert(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAlertHistory(w http.ResponseWriter, r *http.Request) {
-	deviceID := r.URL.Query().Get("device_id")
-	status := r.URL.Query().Get("status")
-	limitStr := r.URL.Query().Get("limit")
-	limit := 100
-	if limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 500 {
-			limit = l
+	pageStr := r.URL.Query().Get("page")
+	pageSizeStr := r.URL.Query().Get("page_size")
+	
+	page := 1
+	pageSize := 20
+	if pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+	if pageSizeStr != "" {
+		if ps, err := strconv.Atoi(pageSizeStr); err == nil && ps > 0 && ps <= 100 {
+			pageSize = ps
 		}
 	}
 
+	deviceID := r.URL.Query().Get("device_id")
+	status := r.URL.Query().Get("status")
+
+	countQuery := `SELECT COUNT(*) FROM alerts`
 	query := `SELECT id, device_id, type, severity, message, status, created_at, resolved_at FROM alerts`
 	args := []interface{}{}
 	argCount := 1
@@ -480,9 +586,19 @@ func (s *Server) handleAlertHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(conditions) > 0 {
+		countQuery += " WHERE " + strings.Join(conditions, " AND ")
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT %d", limit)
+
+	var totalCount int
+	err := s.db.QueryRow(countQuery, args...).Scan(&totalCount)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	offset := (page - 1) * pageSize
+	query += fmt.Sprintf(" ORDER BY created_at DESC OFFSET %d LIMIT %d", offset, pageSize)
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -492,17 +608,17 @@ func (s *Server) handleAlertHistory(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type AlertHistoryView struct {
-		ID        string     `json:"id"`
-		DeviceID  string     `json:"device_id"`
-		Type      string     `json:"type"`
-		Severity  string     `json:"severity"`
-		Message   string     `json:"message"`
-		Status    string     `json:"status"`
-		CreatedAt string     `json:"created_at"`
-		ResolvedAt *string   `json:"resolved_at,omitempty"`
+		ID         string     `json:"id"`
+		DeviceID   string     `json:"device_id"`
+		Type       string     `json:"type"`
+		Severity   string     `json:"severity"`
+		Message    string     `json:"message"`
+		Status     string     `json:"status"`
+		CreatedAt  string     `json:"created_at"`
+		ResolvedAt *string    `json:"resolved_at,omitempty"`
 	}
 
-	var alerts []AlertHistoryView
+	alerts := []AlertHistoryView{}
 	for rows.Next() {
 		var a AlertHistoryView
 		var createdAt time.Time
@@ -519,7 +635,18 @@ func (s *Server) handleAlertHistory(w http.ResponseWriter, r *http.Request) {
 		alerts = append(alerts, a)
 	}
 
-	writeJSON(w, alerts)
+	totalPages := (totalCount + pageSize - 1) / pageSize
+	if totalPages < 1 {
+		totalPages = 1
+	}
+
+	writeJSON(w, PaginatedResponse{
+		Data:       alerts,
+		Page:       page,
+		PageSize:   pageSize,
+		TotalItems: totalCount,
+		TotalPages: totalPages,
+	})
 }
 
 func (s *Server) handleListThresholds(w http.ResponseWriter, r *http.Request) {

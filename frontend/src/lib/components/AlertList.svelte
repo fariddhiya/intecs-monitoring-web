@@ -1,35 +1,53 @@
 <script>
+  import { onMount } from 'svelte';
   import { createEventDispatcher } from 'svelte';
   
-  export let alerts = [];
-  
   const dispatch = createEventDispatcher();
-  let loading = true;
-  let error = null;
   let activeTab = 'active';
   let allAlerts = [];
   let historyAlerts = [];
+  let activePage = 1;
+  let historyPage = 1;
+  let pageSize = 5;
+  let activeTotalPages = 1;
+  let activeTotalItems = 0;
+  let historyTotalPages = 1;
+  let historyTotalItems = 0;
+  let loading = true;
+  let error = null;
+
+  $: visibleAlerts = activeTab === 'history' ? historyAlerts : allAlerts;
+  $: activeCount = activeTotalItems;
+  $: historyCount = historyTotalItems;
+  $: currentCount = visibleAlerts?.length || 0;
+  $: isVisibleFirstPage = (activeTab === 'active' ? activePage : historyPage) <= 1;
 
   async function loadAlerts() {
     try {
-      const res = await fetch('/api/alerts?status=active');
+      const res = await fetch(`/api/alerts?page=${activePage}&page_size=${pageSize}&status=active`);
       if (res.ok) {
-        alerts = await res.json();
+        const json = await res.json();
+        allAlerts = Array.isArray(json.data) ? json.data : json;
+        activeTotalItems = json.total_items || allAlerts.length;
+        activeTotalPages = json.total_pages || Math.ceil(allAlerts.length / pageSize);
       } else {
         error = 'Failed to load alerts';
       }
     } catch (e) {
-      error = 'Connection failed: ' + e.message;
-    } finally {
-      loading = false;
+      error = e.message;
     }
   }
 
   async function loadHistory() {
     try {
-      const res = await fetch('/api/alerts/history?limit=100');
+      const res = await fetch(`/api/alerts/history?page=${historyPage}&page_size=${pageSize}`);
       if (res.ok) {
-        historyAlerts = await res.json();
+        const json = await res.json();
+        historyAlerts = Array.isArray(json.data) ? json.data : json;
+        historyTotalItems = json.total_items || historyAlerts.length;
+        historyTotalPages = json.total_pages || Math.ceil(historyAlerts.length / pageSize);
+      } else {
+        error = 'Failed to load history';
       }
     } catch (e) {
       console.error('Error loading alert history:', e);
@@ -40,18 +58,71 @@
     try {
       await fetch(`/api/alerts/${id}/acknowledge`, { method: 'POST' });
       dispatch('acknowledge', id);
-      await loadAlerts();
+      await Promise.all([loadAlerts(), loadHistory()]);
     } catch (e) {
       console.error('Failed to acknowledge alert:', e);
     }
   }
 
-  $: visibleAlerts = activeTab === 'history' ? historyAlerts : alerts;
+  function switchTab(tab) {
+    activeTab = tab;
+    if (tab === 'active') {
+      activePage = 1;
+      loadAlerts();
+    } else {
+      historyPage = 1;
+      loadHistory();
+    }
+  }
 
-  loadAlerts();
-  loadHistory();
-  setInterval(loadAlerts, 10000);
-  setInterval(loadHistory, 60000);
+  function changePage(page) {
+    if (activeTab === 'active') {
+      if (page >= 1 && page <= activeTotalPages) {
+        activePage = page;
+        loadAlerts();
+      }
+    } else {
+      if (page >= 1 && page <= historyTotalPages) {
+        historyPage = page;
+        loadHistory();
+      }
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function getPageNumbers(totalPages, currentPage) {
+    const pages = [];
+    const maxVisible = 7;
+    
+    if (totalPages <= maxVisible) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      pages.push(1);
+      if (currentPage > 3) pages.push('...');
+      
+      const start = Math.max(2, currentPage - 1);
+      const end = Math.min(totalPages - 1, currentPage + 1);
+      
+      for (let i = start; i <= end; i++) {
+        pages.push(i);
+      }
+      
+      if (currentPage < totalPages - 2) pages.push('...');
+      pages.push(totalPages);
+    }
+    
+    return pages;
+  }
+
+  function handlePageSizeChange(e) {
+    pageSize = parseInt(e.target.value);
+    activePage = 1;
+    historyPage = 1;
+    loadAlerts();
+    loadHistory();
+  }
 
   function getSeverityClass(severity) {
     switch(severity?.toLowerCase()) {
@@ -120,27 +191,21 @@
     document.body.removeChild(link);
   }
 
-  window.addEventListener('intecs:alert', (e) => {
-    const alert = e.detail;
-    if (!alert || !alert.severity) return;
-    
-    // Browser notification
-    if ('Notification' in window && Notification.permission === 'granted') {
-      const icon = alert.severity.toLowerCase() === 'critical' ? '🔴' : '🟡';
-      new Notification(`INTECS ${icon} ${alert.type}`, {
-        body: alert.message,
-        tag: alert.device_id,
-        icon: '/favicon.ico',
-      });
-    }
-    
-    // Reload alerts list
+  window.addEventListener('intecs:alert', () => {
     loadAlerts();
     loadHistory();
   });
 
-  // Request permission on mount
-  requestNotificationPermission();
+  onMount(async () => {
+    loading = true;
+    error = null;
+    await Promise.all([loadAlerts(), loadHistory()]);
+    loading = false;
+    requestNotificationPermission();
+  });
+
+  setInterval(() => loadAlerts(), 10000);
+  setInterval(() => loadHistory(), 60000);
 </script>
 
 <div class="alerts-section">
@@ -148,13 +213,13 @@
     <div style="display: flex; gap: 0.5rem; align-items: center;">
       <button 
         class="tab-btn {activeTab === 'active' ? 'active' : ''}" 
-        on:click={() => activeTab = 'active'}>
-        Active ({alerts.length})
+        on:click={() => switchTab('active')}>
+        Active ({activeCount})
       </button>
       <button 
         class="tab-btn {activeTab === 'history' ? 'active' : ''}" 
-        on:click={() => { activeTab = 'history'; loadHistory(); }}>
-        History ({historyAlerts.length})
+        on:click={() => switchTab('history')}>
+        History ({historyCount})
       </button>
     </div>
     <div style="display: flex; gap: 0.5rem; align-items: center;">
@@ -163,7 +228,7 @@
         on:click={() => exportCSV(visibleAlerts, activeTab === 'active' ? 'active_alerts' : 'alert_history')}>
         &#128196; Export
       </button>
-      <span class="alert-count">{visibleAlerts.length} alert{visibleAlerts.length !== 1 ? 's' : ''}</span>
+      <span class="alert-count">{currentCount} alert{currentCount !== 1 ? 's' : ''}</span>
     </div>
   </div>
   
@@ -201,6 +266,47 @@
           </div>
         </div>
       {/each}
+    </div>
+    
+    <div class="pagination-container">
+      <div class="pagination-info">
+        <span class="info-text">
+          Showing {((activeTab === 'active' ? activePage : historyPage) - 1) * pageSize + 1}–{Math.min((activeTab === 'active' ? activePage : historyPage) * pageSize, activeCount + historyCount)} of {activeTab === 'active' ? activeCount : historyCount} alerts
+        </span>
+        <select class="page-size-select" value={pageSize} on:change={handlePageSizeChange}>
+          <option value="5">5 per page</option>
+          <option value="10">10 per page</option>
+          <option value="15">15 per page</option>
+        </select>
+      </div>
+      
+      <nav class="pagination-nav">
+        <button 
+          class="page-btn" 
+          disabled={isVisibleFirstPage}
+          on:click={() => changePage(activePage - 1)}>
+          &laquo; Prev
+        </button>
+        
+        {#each getPageNumbers(activeTab === 'active' ? activeTotalPages : historyTotalPages, activeTab === 'active' ? activePage : historyPage) as page}
+          {#if page === '...'}
+            <span class="ellipsis">...</span>
+          {:else}
+            <button 
+              class="page-btn {page === (activeTab === 'active' ? activePage : historyPage) ? 'active' : ''}"
+              on:click={() => changePage(page)}>
+              {page}
+            </button>
+          {/if}
+        {/each}
+        
+        <button 
+          class="page-btn" 
+          disabled={(activeTab === 'active' ? activePage : historyPage) >= (activeTab === 'active' ? activeTotalPages : historyTotalPages)}
+          on:click={() => changePage(activePage + 1)}>
+          Next &raquo;
+        </button>
+      </nav>
     </div>
   {/if}
   
@@ -269,6 +375,8 @@
   .alerts-list {
     display: flex;
     flex-direction: column;
+    max-height: 600px;
+    overflow-y: auto;
   }
   
   .alert-item {
@@ -443,6 +551,84 @@
     font-size: 0.9rem;
   }
   
+  .pagination-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    border-top: 1px solid var(--border-light);
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+  
+  .pagination-info {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+  
+  .info-text {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+  
+  .page-size-select {
+    padding: 0.35rem 2rem 0.35rem 0.6rem;
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    background: var(--bg-tertiary) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%2364748b' d='M5 7L1 3h8z'/%3E%3C/svg%3E") no-repeat right 0.4rem center;
+    cursor: pointer;
+    appearance: none;
+  }
+  
+  .page-size-select:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+  }
+  
+  .pagination-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  
+  .page-btn {
+    padding: 0.4rem 0.75rem;
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 36px;
+  }
+  
+  .page-btn:hover:not(:disabled):not(.active) {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-blue);
+  }
+  
+  .page-btn.active {
+    background: var(--accent-blue);
+    border-color: var(--accent-blue);
+    color: white;
+    font-weight: 600;
+  }
+  
+  .page-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  
+  .ellipsis {
+    padding: 0.4rem 0.25rem;
+    color: var(--text-muted);
+    user-select: none;
+  }
+  
   @media (max-width: 640px) {
     .alert-item {
       flex-direction: column;
@@ -452,6 +638,16 @@
     
     .ack-btn {
       width: 100%;
+    }
+    
+    .pagination-container {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    
+    .pagination-nav {
+      justify-content: center;
+      flex-wrap: wrap;
     }
   }
 </style>

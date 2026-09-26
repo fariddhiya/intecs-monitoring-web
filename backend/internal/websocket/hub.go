@@ -39,7 +39,12 @@ func (c *WSClient) readPump() {
 
 	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	c.conn.SetCloseHandler(func(code int, text string) error {
-		log.Printf("WebSocket close from client: code=%d", code)
+		switch code {
+		case websocket.CloseGoingAway, websocket.CloseNormalClosure:
+			return nil
+		default:
+			log.Printf("WebSocket abnormal close: code=%d", code)
+		}
 		return nil
 	})
 
@@ -160,7 +165,6 @@ func (h *Hub) AddClient(conn *websocket.Conn) *WSClient {
 
 	h.updateMQTTStatus()
 
-	log.Printf("Client connected. Total clients: %d", len(h.clients))
 	return client
 }
 
@@ -170,7 +174,6 @@ func (h *Hub) RemoveClient(client *WSClient) {
 	if _, ok := h.clients[client]; ok {
 		close(client.send)
 		delete(h.clients, client)
-		log.Printf("Client disconnected. Total clients: %d", len(h.clients))
 	}
 }
 

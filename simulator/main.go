@@ -50,31 +50,28 @@ func main() {
 	mqttUser := getEnvOrDefault("MQTT_USERNAME", "intecs")
 	mqttPass := getEnvOrDefault("MQTT_PASSWORD", "intecs123")
 
-	opts := mqtt.NewClientOptions().
-		AddBroker(brokerURL).
-		SetClientID("intecs-simulator").
-		SetUsername(mqttUser).
-		SetPassword(mqttPass)
+	var client mqtt.Client
+	
+	for attempts := 0; ; attempts++ {
+		opts := mqtt.NewClientOptions().
+			AddBroker(brokerURL).
+			SetClientID(fmt.Sprintf("intecs-simulator-%d", attempts+1)).
+			SetUsername(mqttUser).
+			SetPassword(mqttPass)
 
-	client := mqtt.NewClient(opts)
-	token := client.Connect()
-	if !token.WaitTimeout(15 * time.Second) {
-		log.Println("Connect timeout, retrying...")
-		for i := 0; i < 30; i++ {
-			time.Sleep(1 * time.Second)
-			if client.IsConnected() {
-				break
-			}
+		client = mqtt.NewClient(opts)
+		token := client.Connect()
+		
+		if token.WaitTimeout(15 * time.Second) && client.IsConnected() {
+			break
 		}
-	}
-
-	maxWait := 60
-	for i := 0; i < maxWait && !client.IsConnected(); i++ {
-		time.Sleep(1 * time.Second)
-	}
-
-	if !client.IsConnected() {
-		log.Fatal("Failed to connect to MQTT broker")
+		
+		if client.IsConnected() {
+			break
+		}
+		
+		log.Printf("MQTT connect attempt %d failed, retrying in 3s...", attempts+1)
+		time.Sleep(3 * time.Second)
 	}
 
 	log.Println("Simulator running... Press Ctrl+C to stop")

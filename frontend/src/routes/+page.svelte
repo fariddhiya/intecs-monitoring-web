@@ -53,9 +53,11 @@
   <StatsCard label="Active Alerts" value={stats.active_alerts} colorClass="stat-alerts" icon="&#9888;" />
 </div>
 
-<DeviceTable />
-
-<AlertList />
+  <DeviceTable />
+  
+  <div class="dashboard-spacer"></div>
+  
+  <AlertList />
 
 <style>
   .stats-grid {
@@ -63,5 +65,11 @@
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 1rem;
     margin-bottom: 2rem;
+  }
+  
+  .dashboard-spacer {
+    height: 2.5rem;
+    border-bottom: 2px solid var(--border-light);
+    margin: 1rem 0 2rem 0;
   }
 </style>
