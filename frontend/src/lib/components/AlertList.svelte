@@ -3,24 +3,24 @@
   import { createEventDispatcher } from 'svelte';
   
   const dispatch = createEventDispatcher();
-  let activeTab = 'active';
-  let allAlerts = [];
-  let historyAlerts = [];
-  let activePage = 1;
-  let historyPage = 1;
-  let pageSize = 5;
-  let activeTotalPages = 1;
-  let activeTotalItems = 0;
-  let historyTotalPages = 1;
-  let historyTotalItems = 0;
-  let loading = true;
-  let error = null;
+  let activeTab = $state('active');
+  let allAlerts = $state([]);
+  let historyAlerts = $state([]);
+  let activePage = $state(1);
+  let historyPage = $state(1);
+  let pageSize = $state(5);
+  let activeTotalPages = $state(1);
+  let activeTotalItems = $state(0);
+  let historyTotalPages = $state(1);
+  let historyTotalItems = $state(0);
+  let loading = $state(true);
+  let error = $state(null);
 
-  $: visibleAlerts = activeTab === 'history' ? historyAlerts : allAlerts;
-  $: activeCount = activeTotalItems;
-  $: historyCount = historyTotalItems;
-  $: currentCount = visibleAlerts?.length || 0;
-  $: isVisibleFirstPage = (activeTab === 'active' ? activePage : historyPage) <= 1;
+  let visibleAlerts = $derived(activeTab === 'history' ? historyAlerts : allAlerts);
+  let activeCount = $derived(activeTotalItems);
+  let historyCount = $derived(historyTotalItems);
+  let currentCount = $derived(visibleAlerts?.length || 0);
+  let isVisibleFirstPage = $derived((activeTab === 'active' ? activePage : historyPage) <= 1);
 
   async function loadAlerts() {
     try {
@@ -117,7 +117,7 @@
   }
 
   function handlePageSizeChange(e) {
-    pageSize = parseInt(e.target.value);
+    pageSize = Number(e.target.value);
     activePage = 1;
     historyPage = 1;
     loadAlerts();
@@ -273,7 +273,7 @@
         <span class="info-text">
           Showing {((activeTab === 'active' ? activePage : historyPage) - 1) * pageSize + 1}–{Math.min((activeTab === 'active' ? activePage : historyPage) * pageSize, activeCount + historyCount)} of {activeTab === 'active' ? activeCount : historyCount} alerts
         </span>
-        <select class="page-size-select" value={pageSize} on:change={handlePageSizeChange}>
+        <select class="page-size-select" bind:value={pageSize} on:change={handlePageSizeChange}>
           <option value="5">5 per page</option>
           <option value="10">10 per page</option>
           <option value="15">15 per page</option>

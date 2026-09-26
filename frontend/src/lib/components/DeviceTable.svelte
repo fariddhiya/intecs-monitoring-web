@@ -1,19 +1,19 @@
 <script>
   import { onMount } from 'svelte';
   
-  let devices = [];
-  let allDevices = [];
-  let error = null;
-  let loading = true;
-  let searchQuery = '';
-  let filterConnection = '';
-  let filterEquipment = '';
-  let sortColumn = 'device_id';
-  let sortDirection = 'ASC';
-  let currentPage = 1;
-  let pageSize = 5;
-  let totalPages = 1;
-  let totalItems = 0;
+  let devices = $state([]);
+  let allDevices = $state([]);
+  let error = $state(null);
+  let loading = $state(true);
+  let searchQuery = $state('');
+  let filterConnection = $state('');
+  let filterEquipment = $state('');
+  let sortColumn = $state('device_id');
+  let sortDirection = $state('ASC');
+  let currentPage = $state(1);
+  let pageSize = $state(5);
+  let totalPages = $state(1);
+  let totalItems = $state(0);
 
   async function loadDevices() {
     loading = true;
@@ -52,9 +52,9 @@
     }
   }
 
-  $: {
+  $effect(() => {
     applyFilters();
-  }
+  });
 
   function applyFilters() {
     devices = [...allDevices];
@@ -198,7 +198,7 @@
   }
 
   function handlePageSizeChange(e) {
-    pageSize = parseInt(e.target.value);
+    pageSize = Number(e.target.value);
     currentPage = 1;
     loadDevices();
   }
@@ -317,7 +317,7 @@
         <span class="info-text">
           Showing {((currentPage - 1) * pageSize) + 1}–{Math.min(currentPage * pageSize, totalItems)} of {totalItems} devices
         </span>
-        <select class="page-size-select" value={pageSize} on:change={handlePageSizeChange}>
+        <select class="page-size-select" bind:value={pageSize} on:change={handlePageSizeChange}>
           <option value="5">5 per page</option>
           <option value="10">10 per page</option>
           <option value="15">15 per page</option>
