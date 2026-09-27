@@ -850,15 +850,17 @@ func (s *Server) handleUpdateThresholds(w http.ResponseWriter, r *http.Request) 
 }
 
 type SeverityCountResponse struct {
-	Active   map[string]int `json:"active"`
-	History  map[string]int `json:"history"`
+	Active       map[string]int `json:"active"`
+	Acknowledged map[string]int `json:"acknowledged"`
+	Solved       map[string]int `json:"solved"`
 }
 
 func (s *Server) handleSeverityCounts(w http.ResponseWriter, r *http.Request) {
 	active := map[string]int{}
-	history := map[string]int{}
+	acknowledged := map[string]int{}
+	solved := map[string]int{}
 
-	rows, err := s.db.Query(`SELECT status, resolved_at IS NOT NULL AS acknowledged, severity, COUNT(*)::int FROM alerts GROUP BY status, resolved_at IS NOT NULL, severity`)
+	rows, err := s.db.Query(`SELECT status, severity, COUNT(*)::int FROM alerts GROUP BY status, severity`)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -867,31 +869,37 @@ func (s *Server) handleSeverityCounts(w http.ResponseWriter, r *http.Request) {
 
 	for rows.Next() {
 		var status string
-		var acknowledged bool
 		var severity string
 		var count int
-		if err := rows.Scan(&status, &acknowledged, &severity, &count); err != nil {
+		if err := rows.Scan(&status, &severity, &count); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		severity = strings.ToLower(severity)
-		if acknowledged {
-			history[severity] += count
-		} else if status == "active" {
+		switch status {
+		case "active":
 			active[severity] += count
+		case "acknowledged":
+			acknowledged[severity] += count
+		case "solved":
+			solved[severity] += count
 		}
 	}
 
 	if active == nil {
 		active = map[string]int{}
 	}
-	if history == nil {
-		history = map[string]int{}
+	if acknowledged == nil {
+		acknowledged = map[string]int{}
+	}
+	if solved == nil {
+		solved = map[string]int{}
 	}
 
 	writeJSON(w, SeverityCountResponse{
-		Active:  active,
-		History: history,
+		Active:       active,
+		Acknowledged: acknowledged,
+		Solved:       solved,
 	})
 }
 
