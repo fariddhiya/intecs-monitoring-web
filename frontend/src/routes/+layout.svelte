@@ -14,6 +14,7 @@
   let themeChanged = 0;
   let user = null;
   let isAuthenticated = false;
+  let navOpen = false;
 
   function checkAuth() {
     if (typeof window === "undefined") return;
@@ -195,40 +196,72 @@
 </script>
 
 {#if !$page.url.pathname.startsWith('/login')}
-  <nav class="navbar">
+  <nav class="navbar" aria-label="Main navigation">
     <div class="nav-container">
-      <a href="/" class="nav-brand">
+      <a href="/" class="nav-brand" aria-label="INTECS dashboard home">
         <span class="nav-brand-icon">&#9881;</span>
         INTECS
       </a>
-      <div class="nav-links">
-        <a href="/" class:active={$page.url.pathname === "/"}>Dashboard</a>
-        <a
-          href="/devices"
-          class:active={$page.url.pathname.startsWith("/devices")}>Devices</a
-        >
-        <a href="/alerts" class:active={$page.url.pathname === "/alerts"}
-          >Alerts</a
-        >
-      </div>
-      <div>
-        {#if isAuthenticated}
-          <div class="nav-user">
-            <span class="user-email">&#128100; {user?.email || "Admin"}</span>
-            <button class="logout-btn" on:click={logout}>Logout</button>
+
+      <button
+        class="nav-hamburger"
+        type="button"
+        aria-label="Toggle menu"
+        aria-expanded={navOpen}
+        on:click={() => navOpen = !navOpen}>
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+      </button>
+
+      <div class="nav-links-wrapper" class:nav-links-open={navOpen}>
+        <div class="nav-groups">
+          <div class="nav-group-center">
+            <a
+              href="/"
+              class="nav-link"
+              class:active={$page.url.pathname === "/"}
+              on:click={() => navOpen = false}>
+              Dashboard
+            </a>
+            <a
+              href="/devices"
+              class="nav-link"
+              class:active={$page.url.pathname.startsWith("/devices")}
+              on:click={() => navOpen = false}>
+              Devices
+            </a>
+            <a
+              href="/alerts"
+              class="nav-link"
+              class:active={$page.url.pathname === "/alerts"}
+              on:click={() => navOpen = false}>
+              Alerts
+            </a>
           </div>
-        {/if}
-        <button
-          class="theme-toggle"
-          on:click={toggleDarkMode}
-          title="Toggle dark mode"
-        >
-          {#if darkMode}
-            &#9788;
-          {:else}
-            &#9790;
-          {/if}
-        </button>
+
+          <div class="nav-group-right">
+            {#if isAuthenticated}
+              <span class="nav-user-avatar">&#128100;</span>
+              <span class="nav-user-email">{user?.email || "Admin"}</span>
+            {/if}
+            <button class="nav-logout" type="button" on:click={logout} aria-label="Logout">
+              Logout
+            </button>
+            <button
+              class="nav-theme-toggle"
+              type="button"
+              on:click={toggleDarkMode}
+              title="Toggle dark mode"
+              aria-label="Toggle dark mode">
+              {#if darkMode}
+                &#9788;
+              {:else}
+                &#9790;
+              {/if}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="mqtt-status-bar" class:disconnected={!mqttConnected}>
@@ -241,6 +274,10 @@
       </span>
     </div>
   </nav>
+
+  {#if navOpen}
+    <div class="nav-overlay" role="presentation" tabindex="-1" on:keydown={(e) => e.key === 'Escape' && (navOpen = false)} on:click={() => navOpen = false}></div>
+  {/if}
 {/if}
 
 <main class:login-main={$page.url.pathname.startsWith('/login')}>
@@ -248,81 +285,499 @@
 </main>
 
 <style>
-  .theme-toggle {
+  nav.navbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background-color: #151e2d;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+
+  [data-theme="light"] nav.navbar {
+    background-color: #ffffff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
+  }
+
+  .nav-container {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+    display: flex;
+    align-items: center;
+    height: 64px;
+    gap: 1rem;
+  }
+
+  /* Brand */
+  .nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    text-decoration: none;
+    color: white;
+    font-weight: 700;
+    font-size: 1.15rem;
+    letter-spacing: 0.03em;
+    flex-shrink: 0;
+    transition: opacity 0.2s ease;
+  }
+
+  [data-theme="light"] .nav-brand {
+    color: #0f172a;
+  }
+
+  .nav-brand:hover {
+    opacity: 0.85;
+  }
+
+  .nav-brand-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    border-radius: 6px;
+    font-size: 1rem;
+    flex-shrink: 0;
+  }
+
+  /* Hamburger */
+  .nav-hamburger {
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
     background: none;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: #94a3b8;
-    padding: 0.5rem;
-    border-radius: var(--radius-md);
+    border: none;
     cursor: pointer;
-    font-size: 1.1rem;
+    padding: 8px;
+    border-radius: 6px;
+    transition: background 0.2s ease;
+  }
+
+  .nav-hamburger:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  [data-theme="light"] .nav-hamburger:hover {
+    background: var(--bg-tertiary);
+  }
+
+  .hamburger-line {
+    display: block;
+    width: 22px;
+    height: 2px;
+    background: #e2e8f0;
+    border-radius: 2px;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+  }
+
+  [data-theme="dark"] .hamburger-line {
+    background: #94a3b8;
+  }
+
+  /* Links wrapper for stacking on mobile */
+  .nav-links-wrapper {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    gap: 2rem;
+  }
+
+  /* 3-group distribution with space-evenly */
+  .nav-groups {
+    display: flex;
+    align-items: center;
+    justify-content: space-evenly;
+    width: 100%;
+    gap: 2rem;
+  }
+
+  .nav-group-center {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+  }
+
+  .nav-group-right {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex-shrink: 0;
+  }
+
+  .nav-link {
+    text-decoration: none;
+    color: #cbd5e1;
+    padding: 0.45rem 0.85rem;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+    font-weight: 500;
+    font-size: 0.875rem;
+    line-height: 1.375;
+    white-space: nowrap;
+    position: relative;
+  }
+
+  [data-theme="light"] .nav-link {
+    color: #475569;
+  }
+
+  .nav-link:hover {
+    color: white;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  [data-theme="light"] .nav-link:hover {
+    color: #0f172a;
+    background: var(--bg-tertiary);
+  }
+
+  .nav-link.active {
+    color: white;
+    background: rgba(59, 130, 246, 0.2);
+    font-weight: 600;
+  }
+
+  [data-theme="light"] .nav-link.active {
+    color: #1e40af;
+    background: #dbeafe;
+  }
+
+  .nav-link:focus-visible {
+    outline: 2px solid #60a5fa;
+    outline-offset: 2px;
+  }
+
+  [data-theme="light"] .nav-link:focus-visible {
+    outline-color: #3b82f6;
+  }
+
+  /* Actions (user + logout + theme toggle) */
+  .nav-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex-shrink: 0;
+  }
+
+  .nav-user-avatar {
+    font-size: 1rem;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  .nav-user-email {
+    font-size: 0.8125rem;
+    color: #94a3b8;
+    white-space: nowrap;
+    font-weight: 400;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-left: 0.375rem;
+    flex-shrink: 1;
+  }
+
+  [data-theme="light"] .nav-user-email {
+    color: #64748b;
+  }
+
+  .nav-logout {
+    background: transparent;
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    color: #f87171;
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    margin-left: 0.25rem;
+  }
+
+  [data-theme="light"] .nav-logout {
+    border-color: rgba(239, 68, 68, 0.2);
+    color: #dc2626;
+  }
+
+  .nav-logout:hover {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #fca5a5;
+  }
+
+  [data-theme="light"] .nav-logout:hover {
+    background: rgba(239, 68, 68, 0.08);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #b91c1c;
+  }
+
+  .nav-logout:focus-visible {
+    outline: 2px solid #f87171;
+    outline-offset: 2px;
+  }
+
+  [data-theme="light"] .nav-logout:focus-visible {
+    outline-color: #dc2626;
+  }
+
+  /* Theme toggle */
+  .nav-theme-toggle {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #94a3b8;
+    padding: 0.4rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1rem;
     line-height: 1;
     transition: all 0.2s ease;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
+    width: 34px;
+    height: 34px;
+    margin-left: 0.25rem;
   }
 
-  .theme-toggle:hover {
+  [data-theme="light"] .nav-theme-toggle {
+    border-color: var(--border-light);
+    color: #64748b;
+  }
+
+  .nav-theme-toggle:hover {
     color: white;
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
   }
 
-  .nav-user {
+  [data-theme="light"] .nav-theme-toggle:hover {
+    color: #0f172a;
+    background: var(--bg-tertiary);
+    border-color: var(--border-medium);
+  }
+
+  .nav-theme-toggle:focus-visible {
+    outline: 2px solid #60a5fa;
+    outline-offset: 2px;
+  }
+
+  /* Mobile overlay */
+  .nav-overlay {
+    position: fixed;
+    inset: 0;
+    top: 64px;
+    z-index: 40;
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  /* MQTT Status Bar */
+  .mqtt-status-bar {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    margin-right: 1rem;
-  }
-
-  .user-email {
-    font-size: 0.85rem;
+    gap: 0.5rem;
+    padding: 0.3rem 1.5rem;
+    font-size: 0.75rem;
+    background-color: rgba(0, 0, 0, 0.2);
     color: #94a3b8;
-    white-space: nowrap;
-    font-weight: 500;
+    transition: background-color 0.3s ease, color 0.3s ease;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
   }
 
-  .logout-btn {
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid rgba(239, 68, 68, 0.3);
+  [data-theme="light"] .mqtt-status-bar {
+    background-color: var(--bg-tertiary);
+    color: var(--text-muted);
+    border-top: 1px solid var(--border-light);
+  }
+
+  .mqtt-status-bar.disconnected {
+    background-color: rgba(239, 68, 68, 0.1);
     color: #fca5a5;
-    padding: 0.4rem 0.85rem;
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    font-size: 0.8rem;
-    font-weight: 500;
-    transition: all 0.2s ease;
+  }
+
+  [data-theme="light"] .mqtt-status-bar.disconnected {
+    background-color: var(--danger-bg);
+    color: var(--danger-text);
+  }
+
+  .mqtt-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--danger);
+    transition: background-color 0.3s ease;
+    flex-shrink: 0;
+  }
+
+  .mqtt-status-dot.online {
+    background-color: var(--success);
+    box-shadow: 0 0 4px rgba(16, 185, 129, 0.4);
+  }
+
+  .mqtt-status-text {
     white-space: nowrap;
-  }
-
-  .logout-btn:hover {
-    background: #ef4444;
-    border-color: #ef4444;
-    color: white;
-  }
-
-  @media (max-width: 768px) {
-    .nav-user {
-      display: none;
-    }
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   main.login-main {
     padding: 0;
   }
 
-  nav.navbar {
-    position: sticky;
-    top: 0;
-    z-index: 50;
+  /* Tablet */
+  @media (max-width: 1024px) {
+    .nav-container {
+      padding: 0 1.25rem;
+      gap: 1.25rem;
+    }
+
+    .nav-user-email {
+      max-width: 120px;
+    }
   }
 
-  .mqtt-status-bar {
-    position: sticky;
-    bottom: 0;
-    width: 100%;
+  /* Mobile */
+  @media (max-width: 768px) {
+    .nav-hamburger {
+      display: flex;
+    }
+
+    .nav-container {
+      height: 56px;
+      gap: 0.75rem;
+      padding: 0 1rem;
+    }
+
+    .nav-brand {
+      font-size: 1.05rem;
+    }
+
+    .nav-brand-icon {
+      width: 28px;
+      height: 28px;
+      font-size: 0.95rem;
+    }
+
+    .nav-links-wrapper {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0;
+      position: absolute;
+      top: 56px;
+      left: 0;
+      right: 0;
+      z-index: 45;
+      background-color: #151e2d;
+      padding: 0;
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease, padding 0.3s ease;
+    }
+
+    [data-theme="light"] .nav-links-wrapper {
+      background-color: #ffffff;
+    }
+
+    .nav-links-wrapper.nav-links-open {
+      max-height: calc(100vh - 56px);
+      overflow-y: auto;
+    }
+
+    .nav-links-wrapper > :first-child {
+      padding: 0.5rem 1rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    [data-theme="light"] .nav-links-wrapper > :first-child {
+      border-bottom-color: var(--border-light);
+    }
+
+    .nav-groups {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0;
+    }
+
+    .nav-group-center {
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .nav-group-right {
+      justify-content: center;
+      flex-wrap: wrap;
+      padding: 0.75rem 0;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      gap: 0.5rem;
+    }
+
+    [data-theme="light"] .nav-group-right {
+      border-top-color: var(--border-light);
+    }
+
+    .nav-actions {
+      padding: 0.75rem 1rem;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    [data-theme="light"] .nav-actions {
+      border-top-color: var(--border-light);
+    }
+
+    .nav-user-email {
+      max-width: none;
+    }
+
+    .nav-link {
+      display: block;
+      width: 100%;
+      padding: 0.625rem 0.75rem;
+      font-size: 0.9rem;
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+    }
+
+    .nav-link.active {
+      padding-left: 0.75rem;
+    }
+
+    .nav-overlay {
+      top: 56px;
+    }
+
+    .mqtt-status-bar {
+      padding: 0.25rem 1rem;
+      font-size: 0.7rem;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .nav-container {
+      padding: 0 0.75rem;
+    }
+
+    .nav-user-avatar {
+      font-size: 0.9rem;
+    }
+
+    .nav-user-email {
+      font-size: 0.75rem;
+    }
+
+    .nav-logout {
+      font-size: 0.75rem;
+      padding: 0.35rem 0.6rem;
+    }
+
+    .nav-theme-toggle {
+      width: 32px;
+      height: 32px;
+    }
   }
 </style>

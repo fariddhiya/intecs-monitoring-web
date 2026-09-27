@@ -4,19 +4,10 @@
 
   const dispatch = createEventDispatcher();
   let activeTab = $state('active');
-  let allAlerts = $state([]);
-  let historyAlerts = $state([]);
-  let activePage = $state(1);
-  let historyPage = $state(1);
   let pageSize = $state(5);
-  let activeTotalPages = $state(1);
-  let activeTotalItems = $state(0);
-  let historyTotalPages = $state(1);
-  let historyTotalItems = $state(0);
   let loading = $state(true);
   let error = $state(null);
   let exporting = $state(false);
-  let severityCounts = $state({ active: {}, history: {} });
 
   let showModal = $state(false);
   let selectedSolveAlert = $state(null);
@@ -38,6 +29,17 @@
   }
   if (!currentUser) currentUser = { email: 'admin@email.com' };
 
+  // Store data per tab as objects keyed by tab name
+  let tabsData = $state({
+    active: { data: [], page: 1, totalPages: 1, totalItems: 0 },
+    acknowledged: { data: [], page: 1, totalPages: 1, totalItems: 0 },
+    solved: { data: [], page: 1, totalPages: 1, totalItems: 0 }
+  });
+
+  let severityCounts = $state({ active: {}, acknowledged: {}, solved: {} });
+
+  let filterSeverities = $state({ active: [], acknowledged: [], solved: [] });
+
   function loadSeverityCounts() {
     fetch('/api/alerts/severity-counts')
       .then(r => r.json())
@@ -47,115 +49,132 @@
       .catch(e => console.error('Failed to load severity counts:', e));
   }
 
-  let filterSeverities = $state({ active: [], history: [] });
-
-  function getFilteredAlerts(alertList, filterKey) {
-    const filters = filterSeverities[filterKey] || [];
+  function getFilteredAlerts(alertList) {
+    const filters = filterSeverities[activeTab] || [];
     if (!filters.length) return alertList;
     return alertList.filter(a => {
       for (const f of filters) {
-        if (f === 'acknowledged') {
-          if (a.status === 'acknowledged') return true;
-        } else {
-          if (a.severity?.toLowerCase() === f) return true;
-        }
+        if (a.severity?.toLowerCase() === f) return true;
       }
       return false;
     });
   }
 
   function toggleFilter(filter) {
-    const key = activeTab === 'active' ? 'active' : 'history';
-    const filters = filterSeverities[key];
+    const filters = filterSeverities[activeTab];
     const idx = filters.indexOf(filter);
     
     if (idx >= 0) {
       filters.splice(idx, 1);
-      filterSeverities[key] = [...filters];
+      filterSeverities[activeTab] = [...filters];
     } else {
-      filterSeverities[key] = [...filters, filter];
+      filterSeverities[activeTab] = [...filters, filter];
     }
   }
 
   function isActive(filter) {
-    return (filterSeverities[activeTab === 'active' ? 'active' : 'history'] || []).includes(filter);
+    return (filterSeverities[activeTab] || []).includes(filter);
   }
 
   function clearFilters() {
-    const key = activeTab === 'active' ? 'active' : 'history';
-    filterSeverities[key] = [];
-    filterSeverities.active = [];
-    filterSeverities.history = [];
-    filterSeverities = { ...filterSeverities };
+    filterSeverities[activeTab] = [];
   }
 
   function hasActiveFilters() {
-    const activeFilters = filterSeverities['active'] || [];
-    const historyFilters = filterSeverities['history'] || [];
-    return activeFilters.length > 0 || historyFilters.length > 0;
+    return !!(filterSeverities[activeTab] || []).length;
   }
 
-  function getVisibleFilters() {
-    const key = activeTab === 'active' ? 'active' : 'history';
-    return filterSeverities[key] || [];
-  }
-
-  let visibleAlerts = $derived(getFilteredAlerts(
-    activeTab === 'history' ? historyAlerts : allAlerts,
-    activeTab === 'history' ? 'history' : 'active'
-  ));
-  let activeCount = $derived(activeTotalItems);
-  let historyCount = $derived(historyTotalItems);
+  let visibleAlerts = $derived(getFilteredAlerts(tabsData[activeTab]?.data || []));
   let currentCount = $derived(visibleAlerts?.length || 0);
-  let isVisibleFirstPage = $derived((activeTab === 'active' ? activePage : historyPage) <= 1);
+  let currentPage = $derived(tabsData[activeTab]?.page || 1);
+  let currentTotalPages = $derived(tabsData[activeTab]?.totalPages || 1);
+  let currentTotalItems = $derived(tabsData[activeTab]?.totalItems || 0);
+  let isVisibleFirstPage = $derived(currentPage <= 1);
 
   let activeSeverityTotals = $derived({
-    critical: severityCounts.active.critical || 0,
-    warning: severityCounts.active.warning || 0,
+    critical: severityCounts.active?.critical || 0,
+    warning: severityCounts.active?.warning || 0,
   });
 
-  let historySeverityTotals = $derived({
-    critical: severityCounts.history.critical || 0,
-    warning: severityCounts.history.warning || 0,
+  let acknowledgedSeverityTotals = $derived({
+    critical: severityCounts.acknowledged?.critical || 0,
+    warning: severityCounts.acknowledged?.warning || 0,
   });
 
-  async function loadAlerts() {
+  let solvedSeverityTotals = $derived({
+    critical: severityCounts.solved?.critical || 0,
+    warning: severityCounts.solved?.warning || 0,
+  });
+
+  let activeCount = $derived(tabsData.active?.totalItems || 0);
+  let acknowledgedCount = $derived(tabsData.acknowledged?.totalItems || 0);
+  let solvedCount = $derived(tabsData.solved?.totalItems || 0);
+
+  let severitiesDisplay = $derived({
+    active: activeSeverityTotals,
+    acknowledged: acknowledgedSeverityTotals,
+    solved: solvedSeverityTotals
+  });
+
+  function buildFetchUrl(status) {
+    if (status === 'active') {
+      return `/api/alerts?page=${tabsData.active.page}&page_size=${pageSize}&status=active`;
+    }
+    if (status === 'acknowledged') {
+      return `/api/alerts?page=${tabsData.acknowledged.page}&page_size=${pageSize}&status=acknowledged`;
+    }
+    if (status === 'solved') {
+      return `/api/alerts?page=${tabsData.solved.page}&page_size=${pageSize}&status=solved`;
+    }
+    return '';
+  }
+
+  async function loadTab(tabName) {
     try {
-      const res = await fetch(`/api/alerts?page=${activePage}&page_size=${pageSize}&status=active`);
+      const statusMap = { active: 'active', acknowledged: 'acknowledged', solved: 'solved' };
+      const url = buildFetchUrl(statusMap[tabName]);
+      const res = await fetch(url);
       if (res.ok) {
         const json = await res.json();
-        allAlerts = Array.isArray(json.data) ? json.data : json;
-        activeTotalItems = json.total_items || allAlerts.length;
-        activeTotalPages = json.total_pages || Math.ceil(allAlerts.length / pageSize);
+        tabsData[tabName] = {
+          data: Array.isArray(json.data) ? json.data : json,
+          page: tabsData[tabName].page,
+          totalItems: json.total_items || 0,
+          totalPages: json.total_pages || 1
+        };
       } else {
-        error = 'Failed to load alerts';
+        if (!error) error = `Failed to load ${tabName} alerts`;
       }
     } catch (e) {
-      error = e.message;
+      if (!error) error = e.message;
     }
   }
 
-  async function loadHistory() {
-    try {
-      const res = await fetch(`/api/alerts/history?page=${historyPage}&page_size=${pageSize}`);
-      if (res.ok) {
-        const json = await res.json();
-        historyAlerts = Array.isArray(json.data) ? json.data : json;
-        historyTotalItems = json.total_items || historyAlerts.length;
-        historyTotalPages = json.total_pages || Math.ceil(historyAlerts.length / pageSize);
-      } else {
-        error = 'Failed to load history';
-      }
-    } catch (e) {
-      console.error('Error loading alert history:', e);
-    }
+  async function loadAllTabs() {
+    loading = true;
+    await Promise.all([
+      loadTab('active'),
+      loadTab('acknowledged'),
+      loadTab('solved'),
+      loadSeverityCounts()
+    ]);
+    loading = false;
+  }
+
+  async function refreshAll() {
+    await Promise.all([
+      loadTab('active'),
+      loadTab('acknowledged'),
+      loadTab('solved'),
+      loadSeverityCounts()
+    ]);
   }
 
   async function handleAcknowledge(id) {
     try {
       await fetch(`/api/alerts/${id}/acknowledge`, { method: 'POST', headers: { 'X-User-Email': currentUser.email } });
       dispatch('acknowledge', id);
-      await Promise.all([loadAlerts(), loadHistory(), loadSeverityCounts()]);
+      await refreshAll();
     } catch (e) {
       console.error('Failed to acknowledge alert:', e);
     }
@@ -182,7 +201,7 @@
         body: JSON.stringify({ notes: solveNotes, user_email: currentUser.email })
       });
       closeModal();
-      await Promise.all([loadAlerts(), loadHistory(), loadSeverityCounts()]);
+      await refreshAll();
     } catch (e) {
       console.error('Failed to solve alert:', e);
     }
@@ -196,32 +215,17 @@
 
   function switchTab(tab) {
     activeTab = tab;
-    if (tab === 'active') {
-      activePage = 1;
-      loadAlerts();
-    } else {
-      historyPage = 1;
-      loadHistory();
-    }
+    loadTab(tab);
   }
 
   function resetCurrentFilters() {
-    const key = activeTab === 'active' ? 'active' : 'history';
-    filterSeverities[key] = [];
+    filterSeverities[activeTab] = [];
   }
 
-  function changePage(page) {
-    if (activeTab === 'active') {
-      if (page >= 1 && page <= activeTotalPages) {
-        activePage = page;
-        loadAlerts();
-      }
-    } else {
-      if (page >= 1 && page <= historyTotalPages) {
-        historyPage = page;
-        loadHistory();
-      }
-    }
+  async function changePage(page) {
+    if (page < 1 || page > currentTotalPages) return;
+    tabsData[activeTab] = { ...tabsData[activeTab], page };
+    loadTab(activeTab);
   }
 
   function getPageNumbers(totalPages, currentPage) {
@@ -254,10 +258,10 @@
     const newValue = Number(e.target.value);
     if (newValue !== pageSize) {
       pageSize = newValue;
-      activePage = 1;
-      historyPage = 1;
-      loadAlerts();
-      loadHistory();
+      for (const tab in tabsData) {
+        tabsData[tab] = { ...tabsData[tab], page: 1 };
+      }
+      loadAllTabs();
     }
   }
 
@@ -297,13 +301,16 @@
     }
   }
 
-  async function exportAllActiveAlerts() {
+  async function exportCurrentTabAlerts() {
     exporting = true;
     try {
+      const statusMap = { active: 'active', acknowledged: 'acknowledged', solved: 'solved' };
+      const suffixMap = { active: 'active_alerts', acknowledged: 'acknowledged_alerts', solved: 'solved_alerts' };
       let allData = [];
       let page = 1;
       while (true) {
-        const res = await fetch(`/api/alerts?page=${page}&page_size=50&status=active`);
+        const status = statusMap[activeTab];
+        const res = await fetch(`/api/alerts?page=${page}&page_size=50&status=${status}`);
         if (!res.ok) break;
         const data = await res.json();
         const items = Array.isArray(data.data) ? data.data : [];
@@ -312,32 +319,8 @@
         if (page >= (data.total_pages || 1)) break;
         page++;
       }
-      if (allData.length === 0) allData = allAlerts;
-      await generateAndDownloadCSV(allData, 'active_alerts');
-    } catch (e) {
-      console.error('Export failed:', e);
-    } finally {
-      exporting = false;
-    }
-  }
-
-  async function exportAllHistoryAlerts() {
-    exporting = true;
-    try {
-      let allData = [];
-      let page = 1;
-      while (true) {
-        const res = await fetch(`/api/alerts/history?page=${page}&page_size=50`);
-        if (!res.ok) break;
-        const data = await res.json();
-        const items = Array.isArray(data.data) ? data.data : [];
-        if (items.length === 0) break;
-        allData = [...allData, ...items];
-        if (page >= (data.total_pages || 1)) break;
-        page++;
-      }
-      if (allData.length === 0) allData = historyAlerts;
-      await generateAndDownloadCSV(allData, 'alert_history');
+      if (allData.length === 0) allData = tabsData[activeTab].data;
+      await generateAndDownloadCSV(allData, suffixMap[activeTab]);
     } catch (e) {
       console.error('Export failed:', e);
     } finally {
@@ -365,28 +348,21 @@
   }
 
   window.addEventListener('intecs:alert', () => {
-    loadAlerts();
-    loadHistory();
-    loadSeverityCounts();
+    refreshAll();
   });
 
   window.addEventListener('alert_updated', () => {
-    loadAlerts();
-    loadHistory();
-    loadSeverityCounts();
+    refreshAll();
   });
 
   onMount(async () => {
     loading = true;
     error = null;
-    await Promise.all([loadAlerts(), loadHistory(), loadSeverityCounts()]);
-    loading = false;
+    await loadAllTabs();
     requestNotificationPermission();
   });
 
-  setInterval(() => loadAlerts(), 10000);
-  setInterval(() => loadHistory(), 60000);
-  setInterval(() => loadSeverityCounts(), 30000);
+  setInterval(() => refreshAll(), 10000);
 </script>
 
 <div class="alerts-section">
@@ -395,12 +371,15 @@
       <button class="tab-btn {activeTab === 'active' ? 'active' : ''}" onclick={() => switchTab('active')}>
         Active ({activeCount})
       </button>
-      <button class="tab-btn {activeTab === 'history' ? 'active' : ''}" onclick={() => switchTab('history')}>
-        History ({historyCount})
+      <button class="tab-btn {activeTab === 'acknowledged' ? 'active' : ''}" onclick={() => switchTab('acknowledged')}>
+        Acknowledged ({acknowledgedCount})
+      </button>
+      <button class="tab-btn {activeTab === 'solved' ? 'active' : ''}" onclick={() => switchTab('solved')}>
+        Solved ({solvedCount})
       </button>
     </div>
     <div style="display: flex; gap: 0.5rem; align-items: center;">
-      <button class="export-btn-small" onclick={activeTab === 'active' ? exportAllActiveAlerts : exportAllHistoryAlerts} disabled={exporting}>
+      <button class="export-btn-small" onclick={exportCurrentTabAlerts} disabled={exporting}>
         {#if exporting}&#x21bb; Downloading...{:else}&#128196; Export All{/if}
       </button>
       <span class="alert-count">{currentCount} alert{currentCount !== 1 ? 's' : ''}</span>
@@ -412,17 +391,10 @@
     {#each ['critical', 'warning'] as sev}
       <button class="filter-chip severity-{sev} {isActive(sev) ? 'active' : ''}" onclick={() => toggleFilter(sev)}>
         {sev.charAt(0).toUpperCase() + sev.slice(1)}
-        <span class="chip-count">{activeTab === 'active' ? (sev === 'critical' ? activeSeverityTotals.critical : activeSeverityTotals.warning) : (sev === 'critical' ? historySeverityTotals.critical : historySeverityTotals.warning)}</span>
+        <span class="chip-count">{severitiesDisplay[activeTab][sev] || 0}</span>
       </button>
     {/each}
-    <div class="filter-label" style="margin-left: 0.5rem; margin-right: -0.2rem;">Status:</div>
-    <button class="filter-chip filter-status {isActive('acknowledged') ? 'active' : ''}" onclick={() => toggleFilter('acknowledged')}>
-      Acknowledged
-      <span class="chip-count">
-        {activeTab === 'active' ? (() => allAlerts.filter(a => a.status === 'acknowledged').length)() : (historySeverityTotals.acknowledged || 0)}
-      </span>
-    </button>
-    {#if getVisibleFilters().length > 0}
+    {#if hasActiveFilters()}
       <button class="clear-filters-btn" onclick={resetCurrentFilters}>
         Clear Filters
       </button>
@@ -436,7 +408,7 @@
     </div>
   {:else if visibleAlerts.length === 0 && !hasActiveFilters()}
     <div class="no-data">
-      {activeTab === 'active' ? 'No active alerts' : 'No alert history'}
+      {activeTab === 'active' ? 'No active alerts' : activeTab === 'acknowledged' ? 'No acknowledged alerts' : 'No solved alerts'}
     </div>
   {:else if visibleAlerts.length === 0}
     <div class="no-data">
@@ -494,7 +466,7 @@
     <div class="pagination-container">
       <div class="pagination-info">
         <span class="info-text">
-          Showing {((activeTab === 'active' ? activePage : historyPage) - 1) * pageSize + 1}&ndash;{Math.min((activeTab === 'active' ? activePage : historyPage) * pageSize, activeCount + historyCount)} of {activeTab === 'active' ? activeCount : historyCount} alerts
+          Showing {((currentPage - 1) * pageSize + 1)}–{Math.min(currentPage * pageSize, currentTotalItems)} of {currentTotalItems} alerts
         </span>
         <select class="page-size-select" value={String(pageSize)} onchange={handlePageSizeChange}>
           <option value="5">5 per page</option>
@@ -504,21 +476,21 @@
       </div>
 
       <nav class="pagination-nav">
-        <button class="page-btn" disabled={isVisibleFirstPage} onclick={() => changePage(activePage - 1)}>
+        <button class="page-btn" disabled={isVisibleFirstPage} onclick={() => changePage(currentPage - 1)}>
           &laquo; Prev
         </button>
 
-        {#each getPageNumbers(activeTab === 'active' ? activeTotalPages : historyTotalPages, activeTab === 'active' ? activePage : historyPage) as page}
+        {#each getPageNumbers(currentTotalPages, currentPage) as page}
           {#if page === '...'}
             <span class="ellipsis">...</span>
           {:else}
-            <button class="page-btn {page === (activeTab === 'active' ? activePage : historyPage) ? 'active' : ''}" onclick={() => changePage(page)}>
+            <button class="page-btn {page === currentPage ? 'active' : ''}" onclick={() => changePage(page)}>
               {page}
             </button>
           {/if}
         {/each}
 
-        <button class="page-btn" disabled={(activeTab === 'active' ? activePage : historyPage) >= (activeTab === 'active' ? activeTotalPages : historyTotalPages)} onclick={() => changePage(activePage + 1)}>
+        <button class="page-btn" disabled={currentPage >= currentTotalPages} onclick={() => changePage(currentPage + 1)}>
           Next &raquo;
         </button>
       </nav>
@@ -562,70 +534,79 @@
 {/if}
 
 <style>
+  /* ── Main wrapper ─────────────────────────────────────── */
   .alerts-section {
     background: var(--bg-secondary);
-    border-radius: var(--radius-lg);
+    border-radius: 16px;
     border: 1px solid var(--border-light);
-    box-shadow: var(--shadow-sm);
+    box-shadow: var(--shadow-card);
     overflow: hidden;
   }
 
+  /* ── Tabs ──────────────────────────────────────────────── */
   .tab-btn {
     background: transparent;
     border: none;
-    padding: 0.5rem 1rem;
+    padding: 0.6rem 1.25rem;
     font-size: 0.85rem;
-    color: var(--text-secondary);
+    color: var(--text-muted);
     cursor: pointer;
-    border-radius: var(--radius-md);
+    border-radius: 10px;
     transition: all 0.2s ease;
     font-weight: 500;
+    white-space: nowrap;
   }
 
-  .tab-btn:hover {
-    color: var(--text-primary);
+  .tab-btn:hover:not(.active) {
+    color: var(--text-secondary);
     background: var(--bg-tertiary);
   }
 
   .tab-btn.active {
     background: var(--accent-blue);
-    color: white;
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow: 0 0 12px rgba(96, 165, 250, 0.2);
   }
 
+  /* ── Export button ─────────────────────────────────────── */
   .export-btn-small {
     background: transparent;
-    border: 1px solid var(--border-light);
+    border: 1px solid var(--border-medium);
     color: var(--text-secondary);
-    padding: 0.35rem 0.6rem;
-    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.85rem;
+    border-radius: 8px;
     font-size: 0.8rem;
     cursor: pointer;
     transition: all 0.2s ease;
+    font-weight: 500;
   }
 
   .export-btn-small:hover:not(:disabled) {
-    background: var(--bg-tertiary);
+    background: var(--bg-elevated);
     color: var(--text-primary);
     border-color: var(--accent-blue);
+    box-shadow: 0 0 0 1px var(--accent-blue);
   }
 
   .export-btn-small:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
   }
 
+  /* ── Filter chips row ──────────────────────────────────── */
   .filter-chips-row {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    padding: 0.85rem 1.25rem;
+    gap: 0.75rem;
+    padding: 1rem 1.5rem;
     border-bottom: 1px solid var(--border-light);
     flex-wrap: wrap;
     background: var(--bg-tertiary);
   }
 
   .filter-label {
-    font-size: 0.8rem;
+    font-size: 0.75rem;
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
@@ -636,76 +617,62 @@
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    padding: 0.25rem 0.75rem;
+    padding: 0.35rem 0.85rem;
     border-radius: 100px;
     font-size: 0.75rem;
-    font-weight: 700;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.03em;
     cursor: pointer;
     transition: all 0.2s ease;
-    border: 2px solid transparent;
+    border: none;
     position: relative;
-    background: #e2e8f0;
-    color: #475569;
-    border-color: rgba(100, 116, 139, 0.2);
   }
 
-  .filter-chip.filter-status.active {
-    background: #3b82f6;
-    color: white;
-    box-shadow: 0 0 0 1px #3b82f6;
-  }
-
+  /* Light-mode defaults (kept for light theme) */
   .filter-chip.severity-critical {
     background: #fee2e2;
     color: #dc2626;
-    border-color: rgba(220, 38, 38, 0.2);
   }
-
   .filter-chip.severity-critical.active {
     background: #dc2626;
     color: white;
-    box-shadow: 0 0 0 1px #dc2626;
   }
 
   .filter-chip.severity-warning {
     background: #fef3c7;
     color: #d97706;
-    border-color: rgba(217, 119, 6, 0.2);
   }
-
   .filter-chip.severity-warning.active {
     background: #d97706;
     color: white;
-    box-shadow: 0 0 0 1px #d97706;
   }
 
   .filter-chip:hover:not(.active) {
-    opacity: 0.8;
     transform: translateY(-1px);
+    filter: brightness(0.95);
   }
 
   .chip-count {
-    background: rgba(0, 0, 0, 0.1);
-    padding: 0.1rem 0.4rem;
+    background: rgba(0, 0, 0, 0.08);
+    padding: 0.05rem 0.45rem;
     border-radius: 100px;
     font-size: 0.65rem;
     font-weight: 600;
   }
 
   .filter-chip.active .chip-count {
-    background: rgba(255, 255, 255, 0.25);
+    background: rgba(255, 255, 255, 0.2);
   }
 
   .clear-filters-btn {
-    padding: 0.2rem 0.6rem;
+    padding: 0.25rem 0.75rem;
     border-radius: 100px;
     font-size: 0.7rem;
     font-weight: 600;
     color: var(--text-muted);
     background: transparent;
-    border: 1px dashed var(--border-light);
+    border: 1px dashed var(--border-medium);
     cursor: pointer;
     transition: all 0.2s ease;
     margin-left: auto;
@@ -717,15 +684,18 @@
     background: var(--danger-bg);
   }
 
+  /* ── Alert count badge ─────────────────────────────────── */
   .alert-count {
     font-size: 0.8rem;
     color: var(--text-muted);
     font-weight: 500;
     background: var(--bg-tertiary);
-    padding: 0.25rem 0.75rem;
+    padding: 0.25rem 0.85rem;
     border-radius: 100px;
+    border: 1px solid var(--border-light);
   }
 
+  /* ── Alerts list ───────────────────────────────────────── */
   .alerts-list {
     display: flex;
     flex-direction: column;
@@ -733,14 +703,15 @@
     overflow-y: auto;
   }
 
+  /* ── Alert card ────────────────────────────────────────── */
   .alert-item {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    padding: 1rem 1.25rem;
+    padding: 1.25rem 1.5rem;
     border-bottom: 1px solid var(--border-light);
-    border-left: 4px solid transparent;
-    transition: background-color 0.2s ease;
+    transition: background-color 0.15s ease;
+    position: relative;
   }
 
   .alert-item:hover {
@@ -751,172 +722,218 @@
     border-bottom: none;
   }
 
+  /* Left accent bar — thickened with inner radius */
+  .alert-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    border-radius: 0 4px 4px 0;
+  }
+
+  /* Severity accent bars */
+  .alert-item.severity-critical::before {
+    background: linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
+  }
   .alert-item.severity-critical {
-    border-left-color: #ef4444;
-    background: linear-gradient(90deg, rgba(239, 68, 68, 0.05), transparent);
+    background: linear-gradient(90deg, rgba(239, 68, 68, 0.04), transparent);
   }
 
+  .alert-item.severity-warning::before {
+    background: linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
+  }
   .alert-item.severity-warning {
-    border-left-color: #f59e0b;
-    background: linear-gradient(90deg, rgba(245, 158, 11, 0.05), transparent);
+    background: linear-gradient(90deg, rgba(245, 158, 11, 0.04), transparent);
   }
 
-  .alert-item.severity-high {
-    border-left-color: #f97316;
+  .alert-item.severity-high::before {
+    background: linear-gradient(180deg, #f97316 0%, #ea580c 100%);
   }
 
+  .alert-item.status-acknowledged::before {
+    background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
+    box-shadow: 0 0 12px rgba(59, 130, 246, 0.15);
+  }
   .alert-item.status-acknowledged {
-    border-left-color: #3b82f6;
-    background: linear-gradient(90deg, rgba(59, 130, 246, 0.05), transparent);
+    background: linear-gradient(90deg, rgba(59, 130, 246, 0.04), transparent);
   }
 
+  .alert-item.status-solved::before {
+    background: linear-gradient(180deg, #22c55e 0%, #16a34a 100%);
+    box-shadow: 0 0 12px rgba(34, 197, 94, 0.15);
+  }
   .alert-item.status-solved {
-    border-left-color: #22c55e;
-    background: linear-gradient(90deg, rgba(34, 197, 94, 0.05), transparent);
+    background: linear-gradient(90deg, rgba(34, 197, 94, 0.04), transparent);
   }
 
+  /* ── Alert header row ──────────────────────────────────── */
   .alert-top {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    margin-bottom: 0.25rem;
+    margin-bottom: 0.35rem;
     flex-wrap: wrap;
   }
 
+  /* ── Badge pills — modern chip style ───────────────────── */
   .alert-badge {
     display: inline-flex;
     align-items: center;
-    gap: 0.25rem;
-    padding: 0.15rem 0.6rem;
+    gap: 0.3rem;
+    padding: 0.2rem 0.7rem;
     border-radius: 100px;
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.04em;
+    border: none;
   }
 
+  /* Critical — red pill with glow on severity critical */
   .alert-badge.severity-critical {
-    background: #fee2e2;
-    color: #dc2626;
+    background: rgba(248, 113, 113, 0.18);
+    color: #fca5a5;
+    box-shadow: 0 0 8px rgba(248, 113, 113, 0.15);
   }
 
+  /* Warning — amber pill */
   .alert-badge.severity-warning {
-    background: #fef3c7;
-    color: #d97706;
+    background: rgba(251, 191, 36, 0.18);
+    color: #fcd34d;
   }
 
+  /* High — orange pill */
   .alert-badge.severity-high {
-    background: #ffedd5;
-    color: #ea580c;
+    background: rgba(249, 115, 22, 0.18);
+    color: #fdba74;
   }
 
+  /* Solved — green pill */
   .alert-badge.solved {
-    background: #dcfce7;
-    color: #16a34a;
-    border: 1px solid #bbf7d0;
+    background: rgba(52, 211, 153, 0.18);
+    color: #6ee7b7;
   }
 
   .alert-type {
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     font-weight: 600;
     color: var(--text-primary);
   }
 
   .alert-device {
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     color: var(--text-muted);
-    font-family: ui-monospace, monospace;
+    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+    background: var(--bg-tertiary);
+    padding: 0.15rem 0.55rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-light);
   }
 
+  /* ── Alert message ─────────────────────────────────────── */
   .alert-message {
-    font-size: 0.9rem;
+    font-size: 0.88rem;
     color: var(--text-secondary);
-    line-height: 1.5;
-    margin: 0.25rem 0;
+    line-height: 1.55;
+    margin: 0.3rem 0;
   }
 
+  /* ── Audit trail / solved info ─────────────────────────── */
   .audit-trail {
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     color: var(--text-muted);
-    margin-top: 0.25rem;
-    padding: 0.25rem 0.5rem;
-    background: rgba(0, 0, 0, 0.02);
-    border-radius: 4px;
+    margin-top: 0.3rem;
+    padding: 0.35rem 0.65rem;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 6px;
+    border: 1px solid var(--border-light);
   }
 
   .audit-solved {
-    color: #16a34a;
-    background: rgba(34, 197, 94, 0.08);
+    color: var(--success-text);
+    background: rgba(52, 211, 153, 0.06);
+    border-color: rgba(52, 211, 153, 0.12);
   }
 
   .solve-notes {
-    font-size: 0.8rem;
-    color: #475569;
-    margin-top: 0.35rem;
-    padding: 0.4rem 0.6rem;
-    background: rgba(34, 197, 94, 0.06);
-    border-left: 3px solid #22c55e;
-    border-radius: 0 4px 4px 0;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-top: 0.4rem;
+    padding: 0.5rem 0.75rem;
+    background: rgba(52, 211, 153, 0.06);
+    border-left: 3px solid var(--success);
+    border-radius: 0 8px 8px 0;
     font-style: italic;
   }
 
+  /* ── Alert footer ──────────────────────────────────────── */
   .alert-footer {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    margin-top: 0.5rem;
+    margin-top: 0.65rem;
     flex-wrap: wrap;
   }
 
   .alert-time {
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     color: var(--text-muted);
+    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
   }
 
+  /* ── Action buttons ────────────────────────────────────── */
   .ack-btn {
     background: var(--accent-blue);
-    color: white;
+    color: #ffffff;
     border: none;
-    padding: 0.35rem 0.75rem;
-    border-radius: var(--radius-sm);
+    padding: 0.4rem 0.85rem;
+    border-radius: 8px;
     cursor: pointer;
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     font-weight: 500;
-    transition: background 0.15s ease;
+    transition: all 0.15s ease;
   }
 
   .ack-btn:hover {
     background: var(--accent-blue-dark);
+    box-shadow: 0 0 0 1px var(--accent-blue);
   }
 
   .solve-btn {
-    background: #16a34a;
-    color: white;
-    border: none;
-    padding: 0.35rem 0.75rem;
-    border-radius: var(--radius-sm);
+    background: rgba(52, 211, 153, 0.18);
+    color: var(--success-text);
+    border: 1px solid rgba(52, 211, 153, 0.25);
+    padding: 0.4rem 0.85rem;
+    border-radius: 8px;
     cursor: pointer;
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     font-weight: 500;
-    transition: background 0.15s ease;
+    transition: all 0.15s ease;
   }
 
   .solve-btn:hover {
-    background: #15803d;
+    background: rgba(52, 211, 153, 0.28);
+    border-color: var(--success);
   }
 
   .resolved-badge {
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     color: var(--success-text);
     background: var(--success-bg);
-    padding: 0.25rem 0.6rem;
-    border-radius: var(--radius-sm);
+    padding: 0.3rem 0.75rem;
+    border-radius: 8px;
+    border: 1px solid rgba(52, 211, 153, 0.15);
   }
 
   .badge-icon {
     font-style: normal;
   }
 
+  /* ── Loading / empty states ────────────────────────────── */
   @keyframes spin {
     to { transform: rotate(360deg); }
   }
@@ -948,17 +965,19 @@
   }
 
   .error-message {
-    padding: 1rem 1.25rem;
+    padding: 1rem 1.5rem;
     color: var(--danger-text);
     background: var(--danger-bg);
-    font-size: 0.9rem;
+    font-size: 0.88rem;
+    border-top: 1px solid var(--border-light);
   }
 
+  /* ── Pagination ────────────────────────────────────────── */
   .pagination-container {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 1rem 1.25rem;
+    padding: 1rem 1.5rem;
     border-top: 1px solid var(--border-light);
     flex-wrap: wrap;
     gap: 1rem;
@@ -971,19 +990,20 @@
   }
 
   .info-text {
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     color: var(--text-muted);
   }
 
   .page-size-select {
-    padding: 0.35rem 2rem 0.35rem 0.6rem;
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-sm);
+    padding: 0.4rem 2rem 0.4rem 0.75rem;
+    border: 1px solid var(--border-medium);
+    border-radius: 8px;
     font-size: 0.8rem;
     color: var(--text-primary);
-    background: var(--bg-tertiary) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%2364748b' d='M5 7L1 3h8z'/%3E%3C/svg%3E") no-repeat right 0.4rem center;
+    background: var(--bg-tertiary) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%238b95a8' d='M5 7L1 3h8z'/%3E%3C/svg%3E") no-repeat right 0.5rem center;
     cursor: pointer;
     appearance: none;
+    transition: border-color 0.2s ease;
   }
 
   .page-size-select:focus {
@@ -994,54 +1014,57 @@
   .pagination-nav {
     display: flex;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.3rem;
   }
 
   .page-btn {
-    padding: 0.4rem 0.75rem;
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.85rem;
+    border: 1px solid var(--border-medium);
+    border-radius: 8px;
     background: transparent;
-    color: var(--text-primary);
-    font-size: 0.85rem;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
     cursor: pointer;
     transition: all 0.2s ease;
-    min-width: 36px;
+    min-width: 38px;
+    font-weight: 500;
   }
 
   .page-btn:hover:not(:disabled):not(.active) {
     background: var(--bg-tertiary);
     border-color: var(--accent-blue);
+    color: var(--text-primary);
   }
 
   .page-btn.active {
     background: var(--accent-blue);
     border-color: var(--accent-blue);
-    color: white;
+    color: #ffffff;
     font-weight: 600;
+    box-shadow: 0 0 8px rgba(96, 165, 250, 0.2);
   }
 
   .page-btn:disabled {
-    opacity: 0.4;
+    opacity: 0.35;
     cursor: not-allowed;
   }
 
   .ellipsis {
-    padding: 0.4rem 0.25rem;
+    padding: 0.4rem 0.3rem;
     color: var(--text-muted);
     user-select: none;
   }
 
-  /* Modal Styles */
+  /* ── Modal ─────────────────────────────────────────────── */
   .modal-overlay {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(0, 0, 0, 0.6);
     z-index: 1000;
-    backdrop-filter: blur(2px);
+    backdrop-filter: blur(4px);
   }
 
   .modal {
@@ -1049,10 +1072,10 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background: var(--bg-primary);
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border-light);
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    background: var(--bg-elevated);
+    border-radius: 16px;
+    border: 1px solid var(--border-medium);
+    box-shadow: 0 25px 60px -12px rgba(0, 0, 0, 0.5);
     z-index: 1001;
     width: 90%;
     max-width: 500px;
@@ -1070,7 +1093,7 @@
 
   .modal-header h3 {
     margin: 0;
-    font-size: 1.1rem;
+    font-size: 1.05rem;
     color: var(--text-primary);
     font-weight: 600;
   }
@@ -1083,6 +1106,7 @@
     cursor: pointer;
     padding: 0.25rem;
     line-height: 1;
+    transition: color 0.15s ease;
   }
 
   .modal-close:hover {
@@ -1103,21 +1127,23 @@
   }
 
   .modal-alert-type {
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     font-weight: 600;
     color: var(--text-primary);
     background: var(--bg-tertiary);
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
+    padding: 0.3rem 0.6rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-light);
   }
 
   .modal-alert-device {
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     color: var(--text-muted);
-    font-family: ui-monospace, monospace;
+    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
     background: var(--bg-tertiary);
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
+    padding: 0.3rem 0.6rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-light);
   }
 
   .modal-alert-msg {
@@ -1136,27 +1162,28 @@
   }
 
   .modal-label .required {
-    color: #ef4444;
+    color: var(--danger);
   }
 
   .modal-label textarea {
     width: 100%;
     padding: 0.75rem;
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-md);
+    border: 1px solid var(--border-medium);
+    border-radius: 10px;
     font-size: 0.9rem;
     font-family: inherit;
     line-height: 1.5;
     resize: vertical;
-    background: var(--bg-secondary);
+    background: var(--bg-tertiary);
     color: var(--text-primary);
     margin-top: 0.5rem;
+    transition: border-color 0.2s ease;
   }
 
   .modal-label textarea:focus {
     outline: none;
     border-color: var(--accent-blue);
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.15);
   }
 
   .modal-label textarea:disabled {
@@ -1173,11 +1200,11 @@
   }
 
   .modal-cancel {
-    padding: 0.5rem 1rem;
+    padding: 0.5rem 1.15rem;
     background: var(--bg-tertiary);
     color: var(--text-secondary);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-md);
+    border: 1px solid var(--border-medium);
+    border-radius: 10px;
     font-size: 0.85rem;
     font-weight: 500;
     cursor: pointer;
@@ -1185,31 +1212,33 @@
   }
 
   .modal-cancel:hover {
-    background: var(--bg-secondary);
+    background: var(--bg-elevated);
     color: var(--text-primary);
   }
 
   .modal-confirm {
     padding: 0.5rem 1.25rem;
-    background: #16a34a;
-    color: white;
+    background: var(--success);
+    color: #ffffff;
     border: none;
-    border-radius: var(--radius-md);
+    border-radius: 10px;
     font-size: 0.85rem;
-    font-weight: 500;
+    font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
   }
 
   .modal-confirm:hover:not(:disabled) {
-    background: #15803d;
+    filter: brightness(1.1);
+    box-shadow: 0 0 0 1px var(--success);
   }
 
   .modal-confirm:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
   }
 
+  /* ── Responsive ────────────────────────────────────────── */
   @media (max-width: 640px) {
     .alert-item {
       flex-direction: column;
