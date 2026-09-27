@@ -9,6 +9,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U intecs"]
       interval: 10s
@@ -17,18 +18,23 @@ services:
 
   hivemq:
     image: hivemq/hivemq4:latest
+    environment:
+      HIVEMQ_ALLOW_ALL_CLIENTS: "false"
     ports:
       - "1883:1883"
       - "8888:8888"
       - "8000:8000"
-      - "9090:9090"
-    environment:
-      HIVEMQ_AUTHENTICATION_PLUGIN_ENABLED: "true"
+      - "9091:8080"
+    volumes:
+      - ./hivemq-entrypoint.sh:/setup/setup.sh:ro
+    command: ["/bin/bash", "/setup/setup.sh"]
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/v2/login > /dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
       retries: 5
+      start_period: 60s
 
   backend:
     build: ./backend

@@ -2,17 +2,22 @@ FROM node:20-alpine AS deps
 
 WORKDIR /app
 
-COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* ./
-RUN npm install --legacy-peer-deps
+RUN npm install -g pnpm@10
+
+COPY package.json pnpm-lock.yaml* ./
+
+RUN pnpm install --no-frozen-lockfile
 
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+RUN npm install -g pnpm@10
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-RUN npm run build
+RUN pnpm build
 
 FROM nginx:alpine
 

@@ -14,6 +14,7 @@
   let pageSize = $state(5);
   let totalPages = $state(1);
   let totalItems = $state(0);
+  let exporting = $state(false);
 
   async function loadDevices() {
     console.log('[loadDevices] page:', currentPage, 'page_size:', pageSize);
@@ -140,30 +141,69 @@
     }
   }
 
-  function exportCSV() {
-    const headers = ['Device ID', 'Name', 'Site', 'Fuel %', 'Temp °C', 'Flow L/min', 'Equipment', 'Connection', 'Last Seen'];
-    const rows = allDevices.map(d => [
-      d.device_id,
-      d.name || '',
-      d.site || '',
-      d.fuel_percent.toFixed(1),
-      d.temperature.toFixed(1),
-      d.flow_rate.toFixed(1),
-      d.equipment_status,
-      d.connection,
-      d.last_seen,
-    ]);
-    
-    const csvContent = [headers.join(','), ...rows.map(r => r.map(v => `"${v}"`).join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `devices_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  async function exportCSV() {
+    exporting = true;
+    try {
+      const searchParams = new URLSearchParams();
+      if (searchQuery) searchParams.set('search', searchQuery);
+      if (filterConnection) searchParams.set('connection', filterConnection);
+      if (filterEquipment) searchParams.set('equipment_status', filterEquipment);
+      if (sortColumn) searchParams.set('sort', sortColumn);
+      if (sortDirection) searchParams.set('dir', sortDirection);
+      
+      let allData = [];
+      let page = 1;
+      let fetchedTotal = 0;
+      
+      while (true) {
+        searchParams.set('page', page);
+        searchParams.set('page_size', pageSize);
+        
+        const res = await fetch(`/api/devices?${searchParams}`);
+        if (!res.ok) break;
+        const data = await res.json();
+        const items = Array.isArray(data.data) ? data.data : data.items || [];
+        
+        if (items.length === 0) break;
+        
+        allData = [...allData, ...items];
+        fetchedTotal = data.total_items || fetchedTotal + items.length;
+        
+        if (page >= (data.total_pages || 1)) break;
+        page++;
+      }
+      
+      if (allData.length === 0) allData = allDevices;
+      
+      const headers = ['Device ID', 'Name', 'Site', 'Fuel %', 'Temp °C', 'Flow L/min', 'Equipment', 'Connection', 'Last Seen'];
+      const rows = allData.map(d => [
+        d.device_id,
+        d.name || '',
+        d.site || '',
+        d.fuel_percent?.toFixed(1) || '0.0',
+        d.temperature?.toFixed(1) || '0.0',
+        d.flow_rate?.toFixed(1) || '0.0',
+        d.equipment_status || '',
+        d.connection || '',
+        d.last_seen || '',
+      ]);
+      
+      const csvContent = [headers.join(','), ...rows.map(r => r.map(v => `"${v}"`).join(','))].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `devices_${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Export failed:', e);
+    } finally {
+      exporting = false;
+    }
   }
 
   function changePage(page) {
@@ -224,8 +264,8 @@
 <div class="table-container">
   <div class="table-header" style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
     <h2>Device Status</h2>
-    <button class="export-btn" on:click={exportCSV} title="Export to CSV">
-      &#128196; Export CSV
+    <button class="export-btn" on:click={exportCSV} disabled={exporting} title="Export all devices to CSV">
+      {#if exporting}&#x21bb; Downloading...{:else}&#128196; Export All CSV{/if}
     </button>
   </div>
   
@@ -476,9 +516,14 @@
     white-space: nowrap;
   }
   
-  .export-btn:hover {
+  .export-btn:hover:not(:disabled) {
     background: var(--success);
     color: white;
+  }
+  
+  .export-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
   
   .time-cell {

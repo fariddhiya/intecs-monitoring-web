@@ -15,6 +15,7 @@
   let historyTotalItems = $state(0);
   let loading = $state(true);
   let error = $state(null);
+  let exporting = $state(false);
 
   let visibleAlerts = $derived(activeTab === 'history' ? historyAlerts : allAlerts);
   let activeCount = $derived(activeTotalItems);
@@ -174,11 +175,69 @@
     }
   }
 
-  function exportCSV(alertsToExport, filename) {
-    if (!alertsToExport.length) return;
+  async function exportAllActiveAlerts() {
+    exporting = true;
+    try {
+      let allData = [];
+      let page = 1;
+      
+      while (true) {
+        const res = await fetch(`/api/alerts?page=${page}&page_size=50&status=active`);
+        if (!res.ok) break;
+        const data = await res.json();
+        const items = Array.isArray(data.data) ? data.data : [];
+        
+        if (items.length === 0) break;
+        
+        allData = [...allData, ...items];
+        
+        if (page >= (data.total_pages || 1)) break;
+        page++;
+      }
+      
+      if (allData.length === 0) allData = allAlerts;
+      await generateAndDownloadCSV(allData, 'active_alerts');
+    } catch (e) {
+      console.error('Export failed:', e);
+    } finally {
+      exporting = false;
+    }
+  }
+
+  async function exportAllHistoryAlerts() {
+    exporting = true;
+    try {
+      let allData = [];
+      let page = 1;
+      
+      while (true) {
+        const res = await fetch(`/api/alerts/history?page=${page}&page_size=50`);
+        if (!res.ok) break;
+        const data = await res.json();
+        const items = Array.isArray(data.data) ? data.data : [];
+        
+        if (items.length === 0) break;
+        
+        allData = [...allData, ...items];
+        
+        if (page >= (data.total_pages || 1)) break;
+        page++;
+      }
+      
+      if (allData.length === 0) allData = historyAlerts;
+      await generateAndDownloadCSV(allData, 'alert_history');
+    } catch (e) {
+      console.error('Export failed:', e);
+    } finally {
+      exporting = false;
+    }
+  }
+
+  async function generateAndDownloadCSV(alerts, filename) {
+    if (!alerts.length) return;
     
     const headers = ['Type', 'Severity', 'Device ID', 'Message', 'Status', 'Created At', 'Resolved At'];
-    const rows = alertsToExport.map(a => [
+    const rows = alerts.map(a => [
       a.type,
       a.severity,
       a.device_id,
@@ -198,6 +257,7 @@
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   }
 
   window.addEventListener('intecs:alert', () => {
@@ -234,8 +294,9 @@
     <div style="display: flex; gap: 0.5rem; align-items: center;">
       <button 
         class="export-btn-small" 
-        on:click={() => exportCSV(visibleAlerts, activeTab === 'active' ? 'active_alerts' : 'alert_history')}>
-        &#128196; Export
+        on:click={activeTab === 'active' ? exportAllActiveAlerts : exportAllHistoryAlerts}
+        disabled={exporting}>
+        {#if exporting}&#x21bb; Downloading...{:else}&#128196; Export All{/if}
       </button>
       <span class="alert-count">{currentCount} alert{currentCount !== 1 ? 's' : ''}</span>
     </div>
@@ -366,10 +427,15 @@
     transition: all 0.2s ease;
   }
   
-  .export-btn-small:hover {
+  .export-btn-small:hover:not(:disabled) {
     background: var(--bg-tertiary);
     color: var(--text-primary);
     border-color: var(--accent-blue);
+  }
+  
+  .export-btn-small:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
   
   .alert-count {
