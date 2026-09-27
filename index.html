@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>INTECS Monitoring - Login</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    width: 100%;
+    height: 100%;
+    min-height: 100dvh;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Poppins, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(ellipse 80% 70% at 50% 45%, #1e293b 0%, #0f172a 45%, #020617 75%, #000000 100%);
+    background-color: #020617;
+    background-attachment: fixed;
+    transition: background 0.4s ease;
+    position: relative;
+  }
+
+  /* Glow halus samar di tengah */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.10) 0%, rgba(59,130,246,0.04) 30%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Grid halus opsional untuk nuansa industrial */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(148,163,184,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148,163,184,0.04) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 50%, black 30%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 50%, black 30%, transparent 75%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Light mode */
+  body.light {
+    background: radial-gradient(ellipse 80% 70% at 50% 45%, #f1f5f9 0%, #e2e8f0 50%, #cbd5e1 100%);
+    background-color: #e2e8f0;
+  }
+  body.light::before {
+    background: radial-gradient(circle at 50% 50%, rgba(59,130,246,0.10) 0%, transparent 60%);
+  }
+
+  .theme-toggle {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.07);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    color: #cbd5e1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.3s ease, transform 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+    z-index: 10;
+  }
+
+  .theme-toggle:hover {
+    background: rgba(255, 255, 255, 0.16);
+    color: #ffffff;
+    border-color: rgba(255,255,255,0.28);
+    transform: scale(1.08);
+  }
+
+  body.light .theme-toggle {
+    background: rgba(255,255,255,0.7);
+    border-color: rgba(15,23,42,0.1);
+    color: #475569;
+  }
+  body.light .theme-toggle:hover {
+    background: #ffffff;
+    color: #0f172a;
+  }
+
+  .theme-toggle svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .login-card {
+    width: 420px;
+    max-width: 100%;
+    border-radius: 24px;
+    overflow: hidden;
+    background: #f8fafc;
+    box-shadow:
+      0 4px 6px rgba(0, 0, 0, 0.15),
+      0 24px 48px rgba(0, 0, 0, 0.4),
+      0 0 0 1px rgba(255, 255, 255, 0.06),
+      0 0 80px rgba(59,130,246,0.08);
+    z-index: 1;
+    animation: rise 0.55s ease-out both;
+  }
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(18px) scale(0.99); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  .card-header {
+    background: linear-gradient(135deg, #38bdf8 0%, #3b82f6 35%, #1d4ed8 70%, #1e40af 100%);
+    padding: 44px 32px 36px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .card-header::before {
+    content: '';
+    position: absolute;
+    top: -60%;
+    left: -30%;
+    width: 160%;
+    height: 220%;
+    background: radial-gradient(circle at 30% 20%, rgba(255,255,255,0.18) 0%, transparent 55%);
+    pointer-events: none;
+  }
+
+  .header-icon {
+    width: 64px;
+    height: 64px;
+    background: rgba(255, 255, 255, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 50%;
+    margin: 0 auto 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    position: relative;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.18);
+  }
+
+  .header-icon svg {
+    width: 30px;
+    height: 30px;
+    color: #ffffff;
+  }
+
+  .card-header h1 {
+    color: #ffffff;
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: -0.4px;
+    margin-bottom: 6px;
+    position: relative;
+  }
+
+  .card-header p {
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: 0.3px;
+    position: relative;
+  }
+
+  .card-body {
+    background: #f8fafc;
+    padding: 32px 32px 30px;
+  }
+
+  body.light .card-body { background: #ffffff; }
+
+  .form-group {
+    margin-bottom: 18px;
+  }
+
+  .form-group label {
+    display: block;
+    font-size: 13px;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 8px;
+    letter-spacing: 0.1px;
+  }
+
+  .input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .input-wrapper .input-icon-left {
+    position: absolute;
+    left: 14px;
+    width: 18px;
+    height: 18px;
+    color: #94a3b8;
+    pointer-events: none;
+    transition: color 0.2s ease;
+    flex-shrink: 0;
+  }
+
+  .input-wrapper input {
+    width: 100%;
+    padding: 12px 14px 12px 44px;
+    font-family: inherit;
+    font-size: 14px;
+    color: #1e293b;
+    background: #ffffff;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 12px;
+    outline: none;
+    transition: border-color 0.25s ease, box-shadow 0.25s ease;
+  }
+
+  .input-wrapper input::placeholder {
+    color: #b6c2d1;
+    font-weight: 400;
+  }
+
+  .input-wrapper input:focus {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+  }
+
+  .input-wrapper:focus-within .input-icon-left {
+    color: #3b82f6;
+  }
+
+  .toggle-password {
+    position: absolute;
+    right: 10px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #94a3b8;
+    padding: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    transition: color 0.2s ease, background 0.2s ease;
+  }
+
+  .toggle-password:hover {
+    color: #475569;
+    background: rgba(15,23,42,0.05);
+  }
+
+  .toggle-password svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .sign-in-btn {
+    width: 100%;
+    padding: 13px 20px;
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 700;
+    color: #ffffff;
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 60%, #1d4ed8 100%);
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: transform 0.25s ease, box-shadow 0.25s ease, filter 0.25s ease;
+    letter-spacing: 0.2px;
+    margin-top: 6px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .sign-in-btn::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.22) 0%, transparent 50%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+
+  .sign-in-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 22px rgba(37, 99, 235, 0.4);
+    filter: brightness(1.05);
+  }
+
+  .sign-in-btn:hover::after { opacity: 1; }
+  .sign-in-btn:active { transform: translateY(0); box-shadow: 0 4px 12px rgba(37,99,235,0.3); }
+
+  .divider {
+    display: flex;
+    align-items: center;
+    margin: 22px 0 18px;
+    gap: 14px;
+  }
+
+  .divider::before,
+  .divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #e2e8f0;
+  }
+
+  .info-box {
+    border: 1.5px dashed #cbd5e1;
+    border-radius: 10px;
+    padding: 13px 16px;
+    text-align: center;
+    background: rgba(255, 255, 255, 0.6);
+  }
+
+  .info-box span {
+    font-size: 12.5px;
+    color: #64748b;
+    line-height: 1.6;
+  }
+
+  .info-box strong {
+    color: #475569;
+    font-weight: 700;
+  }
+
+  .info-box code {
+    font-family: 'Inter', monospace;
+    background: #eef2ff;
+    color: #3730a3;
+    padding: 1px 6px;
+    border-radius: 6px;
+    font-size: 12px;
+  }
+
+  @media (max-width: 480px) {
+    body { padding: 16px 12px; }
+    .login-card { border-radius: 20px; }
+    .card-header { padding: 36px 24px 30px; }
+    .card-header h1 { font-size: 22px; }
+    .card-body { padding: 26px 22px 24px; }
+    .theme-toggle { top: 16px; right: 16px; width: 40px; height: 40px; }
+  }
+</style>
+</head>
+<body>
+
+<button class="theme-toggle" id="themeToggle" aria-label="Toggle dark / light mode" title="Toggle theme">
+  <svg id="moonIcon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/>
+  </svg>
+  <svg id="sunIcon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" style="display:none;">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/>
+  </svg>
+</button>
+
+<main class="login-card" role="main">
+  <div class="card-header">
+    <div class="header-icon" aria-hidden="true">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.992l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.296-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.431l1.296-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+      </svg>
+    </div>
+    <h1>INTECS Monitoring</h1>
+    <p>Fuel Monitoring System</p>
+  </div>
+
+  <div class="card-body">
+    <form id="loginForm" autocomplete="on">
+      <div class="form-group">
+        <label for="email">Email Address</label>
+        <div class="input-wrapper">
+          <svg class="input-icon-left" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/>
+          </svg>
+          <input type="email" id="email" name="email" placeholder="Enter your email" autocomplete="email" required>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="password">Password</label>
+        <div class="input-wrapper">
+          <svg class="input-icon-left" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/>
+          </svg>
+          <input type="password" id="password" name="password" placeholder="Enter your password" autocomplete="current-password" required style="padding-right: 46px;">
+          <button type="button" class="toggle-password" id="togglePassword" aria-label="Show / hide password">
+            <svg id="eyeIcon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>
+            <svg id="eyeOffIcon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor" style="display:none;">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <button type="submit" class="sign-in-btn">Sign In</button>
+
+      <div class="divider" aria-hidden="true"></div>
+
+      <div class="info-box">
+        <span><strong>Default:</strong> <code>admin@email.com</code> / <code>pass</code></span>
+      </div>
+    </form>
+  </div>
+</main>
+
+<script>
+  // Toggle dark / light
+  var themeToggle = document.getElementById('themeToggle');
+  var moonIcon = document.getElementById('moonIcon');
+  var sunIcon = document.getElementById('sunIcon');
+
+  themeToggle.addEventListener('click', function () {
+    var isLight = document.body.classList.toggle('light');
+    moonIcon.style.display = isLight ? 'none' : 'block';
+    sunIcon.style.display = isLight ? 'block' : 'none';
+  });
+
+  // Show / hide password
+  var togglePassword = document.getElementById('togglePassword');
+  var passwordInput = document.getElementById('password');
+  var eyeIcon = document.getElementById('eyeIcon');
+  var eyeOffIcon = document.getElementById('eyeOffIcon');
+
+  togglePassword.addEventListener('click', function () {
+    var show = passwordInput.type === 'password';
+    passwordInput.type = show ? 'text' : 'password';
+    eyeIcon.style.display = show ? 'none' : 'block';
+    eyeOffIcon.style.display = show ? 'block' : 'none';
+    passwordInput.focus();
+  });
+
+  // Demo login
+  document.getElementById('loginForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var email = document.getElementById('email').value.trim();
+    var password = passwordInput.value;
+    if (email === 'admin@email.com' && password === 'pass') {
+      alert('Login berhasil! Selamat datang di INTECS Monitoring.');
+    } else {
+      alert('Email atau password salah.');
+    }
+  });
+</script>
+</body>
+</html>
