@@ -57,6 +57,9 @@ func Migrate(db *sql.DB) error {
 			severity TEXT NOT NULL,
 			message TEXT NOT NULL,
 			status TEXT DEFAULT 'active',
+			acknowledged_by TEXT,
+			solved_by TEXT,
+			solve_notes TEXT,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 			resolved_at TIMESTAMP WITH TIME ZONE
 		)`,
@@ -79,6 +82,18 @@ func Migrate(db *sql.DB) error {
 	for _, q := range queries {
 		if _, err := db.Exec(q); err != nil {
 			return fmt.Errorf("failed to execute query: %w\nQuery: %s", err, q)
+		}
+	}
+
+	// Migrate: add new columns if they don't exist (for existing databases)
+	migrationQueries := []string{
+		`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS acknowledged_by TEXT`,
+		`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS solved_by TEXT`,
+		`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS solve_notes TEXT`,
+	}
+	for _, q := range migrationQueries {
+		if _, err := db.Exec(q); err != nil {
+			log.Printf("Warning: failed to run migration: %v", err)
 		}
 	}
 

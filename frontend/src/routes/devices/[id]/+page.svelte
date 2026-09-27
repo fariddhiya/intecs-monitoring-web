@@ -160,15 +160,26 @@
   }
 
   function formatTime(ts) {
-    return ts ? new Date(ts).toLocaleString([], {
-      month: 'short', day: 'numeric',
-      hour: '2-digit', minute: '2-digit'
-    }) : '-';
+    if (!ts) return '-';
+    const d = new Date(ts);
+    const dd = String(d.getDate()).padStart(2,'0');
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    const yy = String(d.getFullYear()%100).padStart(2,'0');
+    const hh = String(d.getHours()).padStart(2,'0');
+    const mn = String(d.getMinutes()).padStart(2,'0');
+    const ss = String(d.getSeconds()).padStart(2,'0');
+    return `${dd}:${mm}:${yy} ${hh}:${mn}:${ss}`;
   }
 
   function getTimeLabel(ts) {
     const d = new Date(ts);
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const dd = String(d.getDate()).padStart(2,'0');
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    const yy = String(d.getFullYear()%100).padStart(2,'0');
+    const hh = String(d.getHours()).padStart(2,'0');
+    const mn = String(d.getMinutes()).padStart(2,'0');
+    const ss = String(d.getSeconds()).padStart(2,'0');
+    return `${dd}:${mm}:${yy} ${hh}:${mn}:${ss}`;
   }
 
   function getRelativeTime(secs) {
@@ -275,7 +286,7 @@
               if (items.length) {
                 const index = items[0].dataIndex;
                 if (telemetry[index]) {
-                  return new Date(telemetry[index].timestamp).toLocaleString();
+                  const d = new Date(telemetry[index].timestamp); const dd = String(d.getDate()).padStart(2,'0'); const mm = String(d.getMonth()+1).padStart(2,'0'); const yy = String(d.getFullYear()%100).padStart(2,'0'); const hh = String(d.getHours()).padStart(2,'0'); const mn = String(d.getMinutes()).padStart(2,'0'); const ss = String(d.getSeconds()).padStart(2,'0'); return `${dd}:${mm}:${yy} ${hh}:${mn}:${ss}`;
                 }
               }
               return '';

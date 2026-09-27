@@ -51,7 +51,9 @@ func (s *Server) routes() {
 	api.HandleFunc("/devices/{id}/telemetry", s.handleDeviceTelemetry).Methods("GET")
 	api.HandleFunc("/alerts", s.handleAlerts).Methods("GET")
 	api.HandleFunc("/alerts/history", s.handleAlertHistory).Methods("GET")
+	api.HandleFunc("/alerts/severity-counts", s.handleSeverityCounts).Methods("GET")
 	api.HandleFunc("/alerts/{id}/acknowledge", s.handleAckAlert).Methods("POST")
+	api.HandleFunc("/alerts/{id}/solve", s.handleSolveAlert).Methods("POST")
 	api.HandleFunc("/thresholds", s.handleListThresholds).Methods("GET")
 	api.HandleFunc("/thresholds", s.handleUpdateThresholds).Methods("POST")
 	api.HandleFunc("/ws", handleWebSocket(s.wsHub)).Methods("GET")
@@ -86,13 +88,17 @@ type DeviceView struct {
 }
 
 type AlertView struct {
-	ID        string `json:"id"`
-	DeviceID  string `json:"device_id"`
-	Type      string `json:"type"`
-	Severity  string `json:"severity"`
-	Message   string `json:"message"`
-	Status    string `json:"status"`
-	CreatedAt string `json:"created_at"`
+	ID             string  `json:"id"`
+	DeviceID       string  `json:"device_id"`
+	Type           string  `json:"type"`
+	Severity       string  `json:"severity"`
+	Message        string  `json:"message"`
+	Status         string  `json:"status"`
+	CreatedAt      string  `json:"created_at"`
+	ResolvedAt     *string `json:"resolved_at,omitempty"`
+	AcknowledgedBy *string `json:"acknowledged_by,omitempty"`
+	SolvedBy       *string `json:"solved_by,omitempty"`
+	SolveNotes     *string `json:"solve_notes,omitempty"`
 }
 
 type PaginatedResponse struct {
@@ -481,13 +487,18 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 	
 	status := r.URL.Query().Get("status")
 	countQuery := "SELECT COUNT(*) FROM alerts"
-	query := "SELECT id, device_id, type, severity, message, status, created_at FROM alerts"
+	query := "SELECT id, device_id, type, severity, message, status, created_at, resolved_at, acknowledged_by, solved_by, solve_notes FROM alerts"
 	args := []interface{}{}
 	argCount := 1
 
 	if status != "" {
-		countQuery += fmt.Sprintf(" WHERE status = $%d", argCount)
-		query += fmt.Sprintf(" WHERE status = $%d", argCount)
+		if status == "acknowledged" {
+			countQuery += fmt.Sprintf(" WHERE status = $%d AND resolved_at IS NULL", argCount)
+			query += fmt.Sprintf(" WHERE status = $%d AND resolved_at IS NULL", argCount)
+		} else {
+			countQuery += fmt.Sprintf(" WHERE status = $%d", argCount)
+			query += fmt.Sprintf(" WHERE status = $%d", argCount)
+		}
 		args = append(args, status)
 		argCount++
 	}
@@ -513,11 +524,26 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var a AlertView
 		var createdAt time.Time
-		if err := rows.Scan(&a.ID, &a.DeviceID, &a.Type, &a.Severity, &a.Message, &a.Status, &createdAt); err != nil {
+		var resolvedAt sql.NullTime
+		var acknowledgedBy, solvedBy, solveNotes sql.NullString
+		if err := rows.Scan(&a.ID, &a.DeviceID, &a.Type, &a.Severity, &a.Message, &a.Status, &createdAt, &resolvedAt, &acknowledgedBy, &solvedBy, &solveNotes); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		a.CreatedAt = createdAt.Format(time.RFC3339)
+		if resolvedAt.Valid {
+			r := resolvedAt.Time.Format(time.RFC3339)
+			a.ResolvedAt = &r
+		}
+		if acknowledgedBy.Valid {
+			a.AcknowledgedBy = &acknowledgedBy.String
+		}
+		if solvedBy.Valid {
+			a.SolvedBy = &solvedBy.String
+		}
+		if solveNotes.Valid {
+			a.SolveNotes = &solveNotes.String
+		}
 		alerts = append(alerts, a)
 	}
 
@@ -539,10 +565,68 @@ func (s *Server) handleAckAlert(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	alertID := vars["id"]
 
-	_, err := s.db.Exec("UPDATE alerts SET status = 'acknowledged', resolved_at = NOW() WHERE id = $1 AND status = 'active'", alertID)
+	userEmail := r.Header.Get("X-User-Email")
+	if userEmail == "" {
+		userEmail = "admin@email.com"
+	}
+
+	_, err := s.db.Exec(`UPDATE alerts 
+		SET status = 'acknowledged', acknowledged_by = $1 
+		WHERE id = $2 AND status = 'active'`, userEmail, alertID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	if s.wsHub != nil {
+		s.wsHub.Broadcast("alert_updated", map[string]interface{}{
+			"id":       alertID,
+			"status":   "acknowledged",
+			"updated":  time.Now().UTC().Format(time.RFC3339),
+		})
+	}
+
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleSolveAlert(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	alertID := vars["id"]
+
+	var input struct {
+		Notes    string `json:"notes"`
+		UserEmail string `json:"user_email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	userEmail := input.UserEmail
+	if userEmail == "" {
+		userEmail = "admin@email.com"
+	}
+
+	if input.Notes == "" {
+		http.Error(w, "Solve notes are required", http.StatusBadRequest)
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`UPDATE alerts 
+		SET status = 'solved', resolved_at = NOW(), solved_by = $1, solve_notes = $2 
+		WHERE id = $3 AND status IN ('active', 'acknowledged')`, userEmail, input.Notes, alertID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if s.wsHub != nil {
+		s.wsHub.Broadcast("alert_updated", map[string]interface{}{
+			"id":       alertID,
+			"status":   "solved",
+			"updated":  now,
+		})
 	}
 
 	writeJSON(w, map[string]string{"status": "ok"})
@@ -568,8 +652,8 @@ func (s *Server) handleAlertHistory(w http.ResponseWriter, r *http.Request) {
 	deviceID := r.URL.Query().Get("device_id")
 	status := r.URL.Query().Get("status")
 
-	countQuery := `SELECT COUNT(*) FROM alerts`
-	query := `SELECT id, device_id, type, severity, message, status, created_at, resolved_at FROM alerts`
+	countQuery := `SELECT COUNT(*) FROM alerts WHERE resolved_at IS NOT NULL`
+	query := `SELECT id, device_id, type, severity, message, status, created_at, resolved_at, acknowledged_by, solved_by, solve_notes FROM alerts WHERE resolved_at IS NOT NULL`
 	args := []interface{}{}
 	argCount := 1
 
@@ -608,14 +692,17 @@ func (s *Server) handleAlertHistory(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type AlertHistoryView struct {
-		ID         string     `json:"id"`
-		DeviceID   string     `json:"device_id"`
-		Type       string     `json:"type"`
-		Severity   string     `json:"severity"`
-		Message    string     `json:"message"`
-		Status     string     `json:"status"`
-		CreatedAt  string     `json:"created_at"`
-		ResolvedAt *string    `json:"resolved_at,omitempty"`
+		ID             string     `json:"id"`
+		DeviceID       string     `json:"device_id"`
+		Type           string     `json:"type"`
+		Severity       string     `json:"severity"`
+		Message        string     `json:"message"`
+		Status         string     `json:"status"`
+		CreatedAt      string     `json:"created_at"`
+		ResolvedAt     *string    `json:"resolved_at,omitempty"`
+		AcknowledgedBy *string    `json:"acknowledged_by,omitempty"`
+		SolvedBy       *string    `json:"solved_by,omitempty"`
+		SolveNotes     *string    `json:"solve_notes,omitempty"`
 	}
 
 	alerts := []AlertHistoryView{}
@@ -623,7 +710,8 @@ func (s *Server) handleAlertHistory(w http.ResponseWriter, r *http.Request) {
 		var a AlertHistoryView
 		var createdAt time.Time
 		var resolvedAt sql.NullTime
-		if err := rows.Scan(&a.ID, &a.DeviceID, &a.Type, &a.Severity, &a.Message, &a.Status, &createdAt, &resolvedAt); err != nil {
+		var acknowledgedBy, solvedBy, solveNotes sql.NullString
+		if err := rows.Scan(&a.ID, &a.DeviceID, &a.Type, &a.Severity, &a.Message, &a.Status, &createdAt, &resolvedAt, &acknowledgedBy, &solvedBy, &solveNotes); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -631,6 +719,15 @@ func (s *Server) handleAlertHistory(w http.ResponseWriter, r *http.Request) {
 		if resolvedAt.Valid {
 			r := resolvedAt.Time.Format(time.RFC3339)
 			a.ResolvedAt = &r
+		}
+		if acknowledgedBy.Valid {
+			a.AcknowledgedBy = &acknowledgedBy.String
+		}
+		if solvedBy.Valid {
+			a.SolvedBy = &solvedBy.String
+		}
+		if solveNotes.Valid {
+			a.SolveNotes = &solveNotes.String
 		}
 		alerts = append(alerts, a)
 	}
@@ -750,6 +847,52 @@ func (s *Server) handleUpdateThresholds(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, map[string]string{"status": "ok", "device_id": input.DeviceID})
+}
+
+type SeverityCountResponse struct {
+	Active   map[string]int `json:"active"`
+	History  map[string]int `json:"history"`
+}
+
+func (s *Server) handleSeverityCounts(w http.ResponseWriter, r *http.Request) {
+	active := map[string]int{}
+	history := map[string]int{}
+
+	rows, err := s.db.Query(`SELECT status, resolved_at IS NOT NULL AS acknowledged, severity, COUNT(*)::int FROM alerts GROUP BY status, resolved_at IS NOT NULL, severity`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var status string
+		var acknowledged bool
+		var severity string
+		var count int
+		if err := rows.Scan(&status, &acknowledged, &severity, &count); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		severity = strings.ToLower(severity)
+		if acknowledged {
+			history[severity] += count
+		} else if status == "active" {
+			active[severity] += count
+		}
+	}
+
+	if active == nil {
+		active = map[string]int{}
+	}
+	if history == nil {
+		history = map[string]int{}
+	}
+
+	writeJSON(w, SeverityCountResponse{
+		Active:  active,
+		History: history,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, data interface{}) {

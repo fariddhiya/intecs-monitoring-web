@@ -210,7 +210,6 @@
     if (page >= 1 && page <= totalPages) {
       currentPage = page;
       loadDevices();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }
 
@@ -359,7 +358,7 @@
                 {device.connection}
               </span>
             </td>
-            <td class="time-cell">{device.last_seen ? new Date(device.last_seen).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '-'}</td>
+            <td class="time-cell">{device.last_seen ? (() => { const d = new Date(device.last_seen); const dd = String(d.getDate()).padStart(2,'0'); const mm = String(d.getMonth()+1).padStart(2,'0'); const yy = String(d.getFullYear()%100).padStart(2,'0'); const hh = String(d.getHours()).padStart(2,'0'); const mn = String(d.getMinutes()).padStart(2,'0'); const ss = String(d.getSeconds()).padStart(2,'0'); return `${dd}:${mm}:${yy} ${hh}:${mn}:${ss}`; })() : '-'}</td>
           </tr>
         {/each}
       </tbody>

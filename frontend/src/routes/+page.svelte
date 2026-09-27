@@ -1,16 +1,21 @@
 <script>
-  import { onMount } from 'svelte';
-  import StatsCard from '$lib/components/StatsCard.svelte';
-  import DeviceTable from '$lib/components/DeviceTable.svelte';
-  import AlertList from '$lib/components/AlertList.svelte';
+  import { onMount } from "svelte";
+  import StatsCard from "$lib/components/StatsCard.svelte";
+  import DeviceTable from "$lib/components/DeviceTable.svelte";
+  import AlertList from "$lib/components/AlertList.svelte";
 
-  let stats = { total_devices: 0, online_devices: 0, offline_devices: 0, active_alerts: 0 };
+  let stats = {
+    total_devices: 0,
+    online_devices: 0,
+    offline_devices: 0,
+    active_alerts: 0,
+  };
   let loading = true;
   let error = null;
 
   async function loadDashboard() {
     try {
-      const res = await fetch('/api/dashboard');
+      const res = await fetch("/api/dashboard");
       if (res.ok) {
         const data = await res.json();
         stats = {
@@ -21,10 +26,10 @@
         };
         error = null;
       } else {
-        error = 'Failed to load dashboard data';
+        error = "Failed to load dashboard data";
       }
     } catch (e) {
-      error = 'Connection failed: ' + e.message;
+      error = "Connection failed: " + e.message;
     } finally {
       loading = false;
     }
@@ -47,17 +52,38 @@
 {/if}
 
 <div class="stats-grid">
-  <StatsCard label="Total Devices" value={stats.total_devices} colorClass="stat-total" icon="&#128228;" />
-  <StatsCard label="Online" value={stats.online_devices} colorClass="stat-online" icon="&#9989;" />
-  <StatsCard label="Offline" value={stats.offline_devices} colorClass="stat-offline" icon="&#10060;" />
-  <StatsCard label="Active Alerts" value={stats.active_alerts} colorClass="stat-alerts" icon="&#9888;" />
+  <StatsCard
+    label="Total Devices"
+    value={stats.total_devices}
+    colorClass="stat-total"
+    icon="&#128228;"
+  />
+  <StatsCard
+    label="Online"
+    value={stats.online_devices}
+    colorClass="stat-online"
+    icon="&#9989;"
+  />
+  <StatsCard
+    label="Offline"
+    value={stats.offline_devices}
+    colorClass="stat-offline"
+    icon="&#10060;"
+  />
+  <StatsCard
+    label="Active Alerts"
+    value={stats.active_alerts}
+    colorClass="stat-alerts"
+    icon="&#9888;"
+  />
 </div>
 
+<!-- 
   <DeviceTable />
   
   <div class="dashboard-spacer"></div>
   
-  <AlertList />
+  <AlertList /> -->
 
 <style>
   .stats-grid {
@@ -66,7 +92,7 @@
     gap: 1rem;
     margin-bottom: 2rem;
   }
-  
+
   .dashboard-spacer {
     height: 2.5rem;
     border-bottom: 2px solid var(--border-light);

@@ -166,6 +166,11 @@
           new CustomEvent("intecs:alert", { detail: msg.payload }),
         );
         break;
+      case "alert_updated":
+        window.dispatchEvent(
+          new CustomEvent("alert_updated", { detail: msg.payload }),
+        );
+        break;
       case "error":
         console.error("Server error:", msg.payload);
         break;
@@ -226,17 +231,16 @@
         </button>
       </div>
     </div>
+    <div class="mqtt-status-bar" class:disconnected={!mqttConnected}>
+      <span class="mqtt-status-dot" class:online={mqttConnected}></span>
+      <span class="mqtt-status-text">
+        {mqttConnected ? "MQTT Connected" : "MQTT Disconnected"}
+        {mqttLastMsg
+          ? ` · Last msg: ${(() => { const d = new Date(mqttLastMsg); const dd = String(d.getDate()).padStart(2,'0'); const mm = String(d.getMonth()+1).padStart(2,'0'); const yy = String(d.getFullYear()%100).padStart(2,'0'); const hh = String(d.getHours()).padStart(2,'0'); const mn = String(d.getMinutes()).padStart(2,'0'); const ss = String(d.getSeconds()).padStart(2,'0'); return `${dd}:${mm}:${yy} ${hh}:${mn}:${ss}`; })()}`
+          : ""}
+      </span>
+    </div>
   </nav>
-
-  <div class="mqtt-status-bar" class:disconnected={!mqttConnected}>
-    <span class="mqtt-status-dot" class:online={mqttConnected}></span>
-    <span class="mqtt-status-text">
-      {mqttConnected ? "MQTT Connected" : "MQTT Disconnected"}
-      {mqttLastMsg
-        ? ` · Last msg: ${new Date(mqttLastMsg).toLocaleTimeString()}`
-        : ""}
-    </span>
-  </div>
 {/if}
 
 <main class:login-main={$page.url.pathname.startsWith('/login')}>
@@ -308,5 +312,17 @@
 
   main.login-main {
     padding: 0;
+  }
+
+  nav.navbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+
+  .mqtt-status-bar {
+    position: sticky;
+    bottom: 0;
+    width: 100%;
   }
 </style>
