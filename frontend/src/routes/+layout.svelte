@@ -1,6 +1,7 @@
 <script>
   import { page } from "$app/stores";
   import { onMount, onDestroy } from "svelte";
+  import { isTokenValid } from "$lib/utils/auth";
   import "../app.css";
 
   let mqttConnected = false;
@@ -13,20 +14,6 @@
   let themeChanged = 0;
   let user = null;
   let isAuthenticated = false;
-
-  function isTokenValid() {
-    const token = localStorage.getItem("token");
-    if (!token) return false;
-
-    try {
-      const decoded = JSON.parse(atob(token));
-      return decoded.exp > Date.now();
-    } catch (e) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
-      return false;
-    }
-  }
 
   function checkAuth() {
     if (typeof window === "undefined") return;
@@ -202,55 +189,57 @@
   });
 </script>
 
-<nav class="navbar">
-  <div class="nav-container">
-    <a href="/" class="nav-brand">
-      <span class="nav-brand-icon">&#9881;</span>
-      INTECS
-    </a>
-    <div class="nav-links">
-      <a href="/" class:active={$page.url.pathname === "/"}>Dashboard</a>
-      <a
-        href="/devices"
-        class:active={$page.url.pathname.startsWith("/devices")}>Devices</a
-      >
-      <a href="/alerts" class:active={$page.url.pathname === "/alerts"}
-        >Alerts</a
-      >
-    </div>
-    <div>
-      {#if isAuthenticated}
-        <div class="nav-user">
-          <span class="user-email">&#128100; {user?.email || "Admin"}</span>
-          <button class="logout-btn" on:click={logout}>Logout</button>
-        </div>
-      {/if}
-      <button
-        class="theme-toggle"
-        on:click={toggleDarkMode}
-        title="Toggle dark mode"
-      >
-        {#if darkMode}
-          &#9788;
-        {:else}
-          &#9790;
+{#if !$page.url.pathname.startsWith('/login')}
+  <nav class="navbar">
+    <div class="nav-container">
+      <a href="/" class="nav-brand">
+        <span class="nav-brand-icon">&#9881;</span>
+        INTECS
+      </a>
+      <div class="nav-links">
+        <a href="/" class:active={$page.url.pathname === "/"}>Dashboard</a>
+        <a
+          href="/devices"
+          class:active={$page.url.pathname.startsWith("/devices")}>Devices</a
+        >
+        <a href="/alerts" class:active={$page.url.pathname === "/alerts"}
+          >Alerts</a
+        >
+      </div>
+      <div>
+        {#if isAuthenticated}
+          <div class="nav-user">
+            <span class="user-email">&#128100; {user?.email || "Admin"}</span>
+            <button class="logout-btn" on:click={logout}>Logout</button>
+          </div>
         {/if}
-      </button>
+        <button
+          class="theme-toggle"
+          on:click={toggleDarkMode}
+          title="Toggle dark mode"
+        >
+          {#if darkMode}
+            &#9788;
+          {:else}
+            &#9790;
+          {/if}
+        </button>
+      </div>
     </div>
+  </nav>
+
+  <div class="mqtt-status-bar" class:disconnected={!mqttConnected}>
+    <span class="mqtt-status-dot" class:online={mqttConnected}></span>
+    <span class="mqtt-status-text">
+      {mqttConnected ? "MQTT Connected" : "MQTT Disconnected"}
+      {mqttLastMsg
+        ? ` · Last msg: ${new Date(mqttLastMsg).toLocaleTimeString()}`
+        : ""}
+    </span>
   </div>
-</nav>
+{/if}
 
-<div class="mqtt-status-bar" class:disconnected={!mqttConnected}>
-  <span class="mqtt-status-dot" class:online={mqttConnected}></span>
-  <span class="mqtt-status-text">
-    {mqttConnected ? "MQTT Connected" : "MQTT Disconnected"}
-    {mqttLastMsg
-      ? ` · Last msg: ${new Date(mqttLastMsg).toLocaleTimeString()}`
-      : ""}
-  </span>
-</div>
-
-<main>
+<main class:login-main={$page.url.pathname.startsWith('/login')}>
   <slot />
 </main>
 
@@ -283,7 +272,6 @@
     align-items: center;
     gap: 0.75rem;
     margin-right: 1rem;
-    background-color: red;
   }
 
   .user-email {
@@ -316,5 +304,9 @@
     .nav-user {
       display: none;
     }
+  }
+
+  main.login-main {
+    padding: 0;
   }
 </style>
