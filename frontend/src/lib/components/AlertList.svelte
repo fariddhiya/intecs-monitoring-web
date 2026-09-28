@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { createEventDispatcher } from 'svelte';
+  import { formatDateTime as formatAlertTime } from '$lib/utils/datetime';
 
   const dispatch = createEventDispatcher();
   let activeTab = $state('active');
@@ -281,18 +282,6 @@
       case 'high': return '&#128276;';
       default: return '&#8505;';
     }
-  }
-
-  function formatAlertTime(ts) {
-    if (!ts) return '-';
-    const created = new Date(ts);
-    const dd = String(created.getDate()).padStart(2, '0');
-    const mm = String(created.getMonth() + 1).padStart(2, '0');
-    const yy = String(created.getFullYear() % 100).padStart(2, '0');
-    const hh = String(created.getHours()).padStart(2, '0');
-    const mn = String(created.getMinutes()).padStart(2, '0');
-    const ss = String(created.getSeconds()).padStart(2, '0');
-    return `${dd}:${mm}:${yy} ${hh}:${mn}:${ss}`;
   }
 
   function requestNotificationPermission() {

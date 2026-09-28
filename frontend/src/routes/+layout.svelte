@@ -2,6 +2,7 @@
   import { page } from "$app/stores";
   import { onMount, onDestroy } from "svelte";
   import { isTokenValid } from "$lib/utils/auth";
+  import { formatDateTime } from "$lib/utils/datetime";
   import "../app.css";
 
   let mqttConnected = false;
@@ -197,7 +198,7 @@
 
 {#if !$page.url.pathname.startsWith('/login')}
   <nav class="navbar" aria-label="Main navigation">
-    <div class="nav-container">
+    <div class="nav-container layout-container">
       <a href="/" class="nav-brand" aria-label="INTECS dashboard home">
         <span class="nav-brand-icon">&#9881;</span>
         INTECS
@@ -265,13 +266,15 @@
       </div>
     </div>
     <div class="mqtt-status-bar" class:disconnected={!mqttConnected}>
-      <span class="mqtt-status-dot" class:online={mqttConnected}></span>
-      <span class="mqtt-status-text">
-        {mqttConnected ? "MQTT Connected" : "MQTT Disconnected"}
-        {mqttLastMsg
-          ? ` · Last msg: ${(() => { const d = new Date(mqttLastMsg); const dd = String(d.getDate()).padStart(2,'0'); const mm = String(d.getMonth()+1).padStart(2,'0'); const yy = String(d.getFullYear()%100).padStart(2,'0'); const hh = String(d.getHours()).padStart(2,'0'); const mn = String(d.getMinutes()).padStart(2,'0'); const ss = String(d.getSeconds()).padStart(2,'0'); return `${dd}:${mm}:${yy} ${hh}:${mn}:${ss}`; })()}`
-          : ""}
-      </span>
+      <div class="mqtt-status-inner layout-container">
+        <span class="mqtt-status-dot" class:online={mqttConnected}></span>
+        <span class="mqtt-status-text">
+          {mqttConnected ? "MQTT Connected" : "MQTT Disconnected"}
+          {mqttLastMsg
+            ? ` · Last msg: ${formatDateTime(mqttLastMsg)}`
+            : ""}
+        </span>
+      </div>
     </div>
   </nav>
 
@@ -299,13 +302,15 @@
   }
 
   .nav-container {
-    max-width: 1280px;
+    max-width: var(--content-max-width);
+    width: 100%;
     margin: 0 auto;
-    padding: 0 1.5rem;
+    padding: 0 var(--content-gutter, 1.5rem);
     display: flex;
     align-items: center;
     height: 64px;
     gap: 1rem;
+    min-width: 0;
   }
 
   /* Brand */
@@ -382,21 +387,25 @@
     display: flex;
     align-items: center;
     flex: 1;
-    gap: 2rem;
+    min-width: 0;
   }
 
-  /* 3-group distribution with space-evenly */
+  /* Brand left / nav center / right-section pushed right with margin-left:auto */
   .nav-groups {
     display: flex;
     align-items: center;
-    justify-content: space-evenly;
+    flex: 1;
     width: 100%;
-    gap: 2rem;
+    min-width: 0;
+    gap: 1rem;
   }
 
   .nav-group-center {
     display: flex;
     align-items: center;
+    justify-content: center;
+    flex: 1;
+    min-width: 0;
     gap: 0.375rem;
   }
 
@@ -405,6 +414,8 @@
     align-items: center;
     gap: 0.25rem;
     flex-shrink: 0;
+    margin-left: auto;
+    min-width: 0;
   }
 
   .nav-link {
@@ -574,17 +585,27 @@
     background: rgba(0, 0, 0, 0.5);
   }
 
-  /* MQTT Status Bar */
+  /* MQTT Status Bar — inner content shares the same max-width as main */
   .mqtt-status-bar {
     display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.3rem 1.5rem;
+    justify-content: center;
+    padding: 0.3rem 0;
     font-size: 0.75rem;
     background-color: rgba(0, 0, 0, 0.2);
     color: #94a3b8;
     transition: background-color 0.3s ease, color 0.3s ease;
     border-top: 1px solid rgba(255, 255, 255, 0.04);
+  }
+
+  .mqtt-status-inner {
+    max-width: var(--content-max-width);
+    width: 100%;
+    margin: 0 auto;
+    padding: 0 var(--content-gutter, 1.5rem);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
   }
 
   [data-theme="light"] .mqtt-status-bar {
@@ -630,8 +651,11 @@
   /* Tablet */
   @media (max-width: 1024px) {
     .nav-container {
-      padding: 0 1.25rem;
-      gap: 1.25rem;
+      gap: 1rem;
+    }
+
+    .nav-group-center {
+      gap: 0.25rem;
     }
 
     .nav-user-email {
@@ -643,12 +667,12 @@
   @media (max-width: 768px) {
     .nav-hamburger {
       display: flex;
+      margin-left: auto;
     }
 
     .nav-container {
       height: 56px;
       gap: 0.75rem;
-      padding: 0 1rem;
     }
 
     .nav-brand {
@@ -702,11 +726,15 @@
     }
 
     .nav-group-center {
+      flex: none;
       flex-direction: column;
+      align-items: stretch;
+      justify-content: flex-start;
       gap: 0;
     }
 
     .nav-group-right {
+      margin-left: 0;
       justify-content: center;
       flex-wrap: wrap;
       padding: 0.75rem 0;
@@ -752,16 +780,12 @@
     }
 
     .mqtt-status-bar {
-      padding: 0.25rem 1rem;
+      padding: 0.25rem 0;
       font-size: 0.7rem;
     }
   }
 
   @media (max-width: 480px) {
-    .nav-container {
-      padding: 0 0.75rem;
-    }
-
     .nav-user-avatar {
       font-size: 0.9rem;
     }

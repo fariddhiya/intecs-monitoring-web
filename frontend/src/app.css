@@ -1,5 +1,9 @@
-/* Light mode (default) */
+/* Layout — single source of truth for content width.
+   Navbar inner container MUST use the same max-width so left/right
+   edges align with the main content / Active Alerts container. */
 :root {
+  --content-max-width: 1280px;
+  --content-gutter: 1.5rem;
   --bg-primary: #f8fafc;
   --bg-secondary: #ffffff;
   --bg-tertiary: #f1f5f9;
@@ -109,9 +113,20 @@ body {
 }
 
 main {
-  max-width: 1280px;
+  max-width: var(--content-max-width);
+  width: 100%;
   margin: 0 auto;
-  padding: 2rem 1.5rem 4rem;
+  padding: 2rem var(--content-gutter) 4rem;
+}
+
+/* Shared centered container — same boundaries as <main>.
+   Reuse this class (or the --content-max-width variable) instead of
+   duplicating arbitrary width values. */
+.layout-container {
+  max-width: var(--content-max-width);
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 var(--content-gutter);
 }
 
 .page-title {
@@ -334,7 +349,10 @@ main {
 }
 
 @media (max-width: 768px) {
-  
+  :root {
+    --content-gutter: 1rem;
+  }
+
   main {
     padding: 1.5rem 1rem 3rem;
   }

@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { formatDateTime } from '$lib/utils/datetime';
   
   let devices = $state([]);
   let allDevices = $state([]);
@@ -358,7 +359,7 @@
                 {device.connection}
               </span>
             </td>
-            <td class="time-cell">{device.last_seen ? (() => { const d = new Date(device.last_seen); const dd = String(d.getDate()).padStart(2,'0'); const mm = String(d.getMonth()+1).padStart(2,'0'); const yy = String(d.getFullYear()%100).padStart(2,'0'); const hh = String(d.getHours()).padStart(2,'0'); const mn = String(d.getMinutes()).padStart(2,'0'); const ss = String(d.getSeconds()).padStart(2,'0'); return `${dd}:${mm}:${yy} ${hh}:${mn}:${ss}`; })() : '-'}</td>
+            <td class="time-cell">{formatDateTime(device.last_seen)}</td>
           </tr>
         {/each}
       </tbody>

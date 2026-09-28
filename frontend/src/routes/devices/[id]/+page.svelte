@@ -2,6 +2,7 @@
   import { page } from '$app/stores';
   import { onMount, onDestroy } from 'svelte';
   import { Chart, registerables } from 'chart.js';
+  import { formatDateTime } from '$lib/utils/datetime';
   
   Chart.register(...registerables);
 
@@ -160,26 +161,11 @@
   }
 
   function formatTime(ts) {
-    if (!ts) return '-';
-    const d = new Date(ts);
-    const dd = String(d.getDate()).padStart(2,'0');
-    const mm = String(d.getMonth()+1).padStart(2,'0');
-    const yy = String(d.getFullYear()%100).padStart(2,'0');
-    const hh = String(d.getHours()).padStart(2,'0');
-    const mn = String(d.getMinutes()).padStart(2,'0');
-    const ss = String(d.getSeconds()).padStart(2,'0');
-    return `${dd}:${mm}:${yy} ${hh}:${mn}:${ss}`;
+    return formatDateTime(ts);
   }
 
   function getTimeLabel(ts) {
-    const d = new Date(ts);
-    const dd = String(d.getDate()).padStart(2,'0');
-    const mm = String(d.getMonth()+1).padStart(2,'0');
-    const yy = String(d.getFullYear()%100).padStart(2,'0');
-    const hh = String(d.getHours()).padStart(2,'0');
-    const mn = String(d.getMinutes()).padStart(2,'0');
-    const ss = String(d.getSeconds()).padStart(2,'0');
-    return `${dd}:${mm}:${yy} ${hh}:${mn}:${ss}`;
+    return formatDateTime(ts);
   }
 
   function getRelativeTime(secs) {
@@ -286,7 +272,7 @@
               if (items.length) {
                 const index = items[0].dataIndex;
                 if (telemetry[index]) {
-                  const d = new Date(telemetry[index].timestamp); const dd = String(d.getDate()).padStart(2,'0'); const mm = String(d.getMonth()+1).padStart(2,'0'); const yy = String(d.getFullYear()%100).padStart(2,'0'); const hh = String(d.getHours()).padStart(2,'0'); const mn = String(d.getMinutes()).padStart(2,'0'); const ss = String(d.getSeconds()).padStart(2,'0'); return `${dd}:${mm}:${yy} ${hh}:${mn}:${ss}`;
+                  return formatDateTime(telemetry[index].timestamp);
                 }
               }
               return '';
